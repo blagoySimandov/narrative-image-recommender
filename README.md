@@ -9,8 +9,8 @@ This image shows an example run of the notebook.
 
 ![demo](./docs/demo.png)
 
-The example uses album id `504823` from the VIST test dataset and these queries:
-uses these three text queries:
+The example uses album id `504823` from the VIST test dataset and these
+three text queries:
 
 - "cat going to sleep"
 - "people posing for a photo"
