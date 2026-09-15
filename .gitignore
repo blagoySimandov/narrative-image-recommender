@@ -1,0 +1,13 @@
+.venv
+dii
+.DS_Store
+__pycache__
+images
+narrative_image_recommender.egg-info
+failed_downloads.log
+*.pyc
+*.pyo
+.ipynb_checkpoints
+sis
+# Generated from jupytext
+clip_recommend.ipynb
