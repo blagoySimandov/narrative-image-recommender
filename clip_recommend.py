@@ -1,25 +1,19 @@
 # %% [markdown]
 # # CLIP Image Recommender
 #
-# This notebook takes a text query. It finds the images in an album that match
-# the query. It uses CLIP to compare the text and the images.
+# This notebook takes a text query. It finds the images in an album that
+# match the query.
 #
-# ## References
+# CLIP has two neural networks: an image encoder and a text encoder. The two
+# networks train together. This training puts the output of each network in
+# the same vector space.
 #
-# - CLIP paper: https://arxiv.org/abs/2103.00020
-# - VIST dataset paper: https://arxiv.org/abs/1604.03968
+# CLIP  is trained on 400
+# million pairs of an image and a caption from the internet. The training
+# task is "Does this image match this caption, or not?"
+# Because of this method, CLIP can work with any text query at run time.
 #
-# Page 4, Section 2.3
-#
-# > "multi-modal embedding space by jointly training an image encoder and
-# > text encoder to maximize the cosine similarity of the image and text
-# > embeddings of the N real pairs in the batch while minimizing the cosine
-# > similarity of the embeddings of the N^2 minus N incorrect pairings."
-#
-# Page 5, Figure 3 of the CLIP paper gives the pseudocode. The functions
-# `encode_images`, `encode_text`, and `rank_images` below follow this
-# pseudocode: normalize each embedding, then take the dot product to get the
-# cosine similarity score.
+# Reference: CLIP paper, https://arxiv.org/abs/2103.00020
 
 # %%
 import json
