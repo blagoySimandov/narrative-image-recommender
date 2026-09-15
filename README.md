@@ -1,7 +1,20 @@
 # Narrative Image Recommender
 
 This project finds images that match a text story. It uses the VIST
-dataset and the CLIP model.
+dataset and the CLIP model. Currently it is in development and it only does photo selection (no ordering)
+
+## Demo
+
+This image shows an example run of the notebook.
+
+![demo](./docs/demo.png)
+
+The example uses album id `504823` from the VIST test dataset and these queries:
+uses these three text queries:
+
+- "cat going to sleep"
+- "people posing for a photo"
+- "a sunny day outside"
 
 ## Setup
 
