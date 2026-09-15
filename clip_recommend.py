@@ -19,6 +19,7 @@
 import json
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import torch
 from PIL import Image
 from transformers import CLIPModel, CLIPProcessor
@@ -114,15 +115,34 @@ def rank_images(
 
 
 # %% [markdown]
+# ## Plot a Grid of Results
+#
+# This function takes the ranked results for a list of queries. It plots a
+# grid. Each row is one query. Each column is one top match.
+
+# %%
+def plot_results_grid(results_by_query: dict, top_k: int):
+    fig, axes = plt.subplots(len(results_by_query), top_k, figsize=(4 * top_k, 4 * len(results_by_query)))
+    for row, (q, results) in enumerate(results_by_query.items()):
+        for col, (path, score) in enumerate(results):
+            ax = axes[row, col]
+            ax.imshow(Image.open(path))
+            ax.set_title(f"{score:.4f}\n{path.name}")
+            ax.axis("off")
+        axes[row, 0].set_ylabel(q, rotation=0, labelpad=60, fontsize=12)
+    plt.tight_layout()
+    plt.show()
+
+
+# %% [markdown]
 # ## Set the Inputs
 #
-# Set the json path, the album id, the text query, and the top k value here.
-# Change these values to try a different album or a different query.
+# Set the json path, the album id, and the top k value here. Change these
+# values to try a different album.
 
 # %%
 json_path = Path("sis/test.story-in-sequence.json")
 album_id = "504823"
-query = "cat going to sleep"
 top_k = 5
 
 # %% [markdown]
@@ -154,24 +174,29 @@ image_paths
 
 # %%
 image_features = encode_images(image_paths, processor, model, device)
-text_feature = encode_text(query, processor, model, device)
 
 # %% [markdown]
-# ## Show the Top Matches
+# ## Compare Many Queries
 #
-# This step ranks the images against the query and plots the top matches.
+# This step tests a list of queries against the same album. Edit the
+# `queries` list to test different text.
 
 # %%
-import matplotlib.pyplot as plt
+queries = [
+    "cat going to sleep",
+    "people posing for a photo",
+    "playing a game",
+]
 
-results = rank_images(image_paths, image_features, text_feature, top_k)
+results_by_query = {}
+for q in queries:
+    text_feature = encode_text(q, processor, model, device)
+    results_by_query[q] = rank_images(image_paths, image_features, text_feature, top_k)
 
-fig, axes = plt.subplots(1, len(results), figsize=(4 * len(results), 4))
-for ax, (path, score) in zip(axes, results):
-    ax.imshow(Image.open(path))
-    ax.set_title(f"{score:.4f}\n{path.name}")
-    ax.axis("off")
-plt.show()
+plot_results_grid(results_by_query, top_k)
 
+# %%
+
+# %%
 
 # %%

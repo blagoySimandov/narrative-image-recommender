@@ -68,3 +68,10 @@ This allows you to edit the notebooks in your favourite text editor while
 still being able to run them in Jupyter.
 
 ![jupytext-example](./docs/screenshot-jupytext-open.png)
+
+## NOTE (!Important!)
+
+Currently the project is in development.
+The only explored part is photo selection via CLIP.
+
+This repo will be used for further exploration and may diverge vastly from this initial step...
