@@ -55,7 +55,7 @@ def _():
         load_clip,
         rank_images,
     )
-    from dataset_loaders import load_yfcc_album_images
+    from dataset_loaders import load_yfcc_album_images, load_vist_album_images
 
     BLIP_MODEL_NAME = "Salesforce/blip-image-captioning-base"
     return (
@@ -68,6 +68,7 @@ def _():
         encode_images,
         encode_text,
         load_clip,
+        load_vist_album_images,
         load_yfcc_album_images,
         pipeline,
         rank_images,
@@ -79,22 +80,43 @@ def _():
 def _(mo):
     mo.md(r"""
     ## Set Configuration
+
+    Pick which dataset to run the pipeline against.
     """)
     return
 
 
 @app.cell
-def _(Path):
-    city = "Amsterdam"
-    city_dir = Path("datasets/yfcmmf00m-cities-amsterdam")
-    album_id = "98"
-    max_photos =500
+def _(mo):
+    dataset_choice = mo.ui.radio(
+        options=["yfcc_amsterdam", "vist"],
+        value="yfcc_amsterdam",
+        label="Dataset",
+    )
+    dataset_choice
+    return (dataset_choice,)
+
+
+@app.cell
+def _(Path, dataset_choice):
+    max_photos = 500
     top_k = 5
 
     NUM_STEPS = 5
     TEMPERATURE = 1.0
     MAX_NEW_TOKENS = 30
     MAX_SENTENCE_WORDS = 15
+
+    if dataset_choice.value == "yfcc_amsterdam":
+        city = "Amsterdam"
+        city_dir = Path("datasets/yfcmmf00m-cities-amsterdam")
+        album_id = "98"
+        json_path = None
+    else:
+        city = None
+        city_dir = None
+        album_id = "72157608661271127"
+        json_path = Path("datasets/sis/train.story-in-sequence.json")
     return (
         MAX_NEW_TOKENS,
         MAX_SENTENCE_WORDS,
@@ -103,6 +125,7 @@ def _(Path):
         album_id,
         city,
         city_dir,
+        json_path,
         max_photos,
     )
 
@@ -130,8 +153,20 @@ def _(mo):
 
 
 @app.cell
-def _(album_id, city, city_dir, load_yfcc_album_images, max_photos):
-    image_records = load_yfcc_album_images(city, album_id, city_dir)[:max_photos]
+def _(
+    album_id,
+    city,
+    city_dir,
+    dataset_choice,
+    json_path,
+    load_vist_album_images,
+    load_yfcc_album_images,
+    max_photos,
+):
+    if dataset_choice.value == "yfcc_amsterdam":
+        image_records = load_yfcc_album_images(city, album_id, city_dir)[:max_photos]
+    else:
+        image_records = load_vist_album_images(album_id, json_path)[:max_photos]
     image_paths = [r.path for r in image_records]
     return (image_paths,)
 
@@ -390,7 +425,7 @@ def _(image_base, mo, story, story_images):
         caption = image_base.captions.get(path, "")
         cards.append(story_card(path, caption, sentence))
         if i < len(story_images) - 1:
-            cards.append(mo.md("### →"))
+            cards.append(mo.md("### ->"))
 
     mo.hstack(cards, align="center", gap=1, wrap=True)
     return
@@ -403,17 +438,8 @@ def _(image_base):
     return
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    Clearly the problem isnot really the prompt or the llm... It just the fact that ALL THE IMAGES IN AMSTERDAM IS SOMEONE RIDING A BIKE
-    """)
-    return
-
-
 @app.cell
 def _():
-        
     return
 
 
