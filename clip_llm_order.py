@@ -39,7 +39,6 @@ def _(mo):
 
 @app.cell
 def _():
-    from dataclasses import dataclass
     from pathlib import Path
 
     import torch
@@ -48,28 +47,29 @@ def _():
     import matplotlib.pyplot as plt
     from PIL import Image
 
-    from clip_utils import (
+    from image_pipeline import (
+        ImageBase,
+        ImageEntry,
         encode_images,
         encode_text,
-        find_album_images,
         load_clip,
         rank_images,
     )
+    from dataset_loaders import load_yfcc_album_images
 
     BLIP_MODEL_NAME = "Salesforce/blip-image-captioning-base"
     return (
         AutoModelForCausalLM,
         AutoTokenizer,
         BLIP_MODEL_NAME,
-        Image,
+        ImageBase,
+        ImageEntry,
         Path,
-        dataclass,
         encode_images,
         encode_text,
-        find_album_images,
         load_clip,
+        load_yfcc_album_images,
         pipeline,
-        plt,
         rank_images,
         torch,
     )
@@ -78,22 +78,33 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Set the Inputs
+    ## Set Configuration
     """)
     return
 
 
 @app.cell
 def _(Path):
-    json_path = Path("sis/test.story-in-sequence.json")
-    album_id = "504823"
+    city = "Amsterdam"
+    city_dir = Path("datasets/yfcmmf00m-cities-amsterdam")
+    album_id = "98"
+    max_photos =500
     top_k = 5
 
     NUM_STEPS = 5
     TEMPERATURE = 1.0
     MAX_NEW_TOKENS = 30
     MAX_SENTENCE_WORDS = 15
-    return MAX_NEW_TOKENS, MAX_SENTENCE_WORDS, NUM_STEPS, TEMPERATURE, album_id
+    return (
+        MAX_NEW_TOKENS,
+        MAX_SENTENCE_WORDS,
+        NUM_STEPS,
+        TEMPERATURE,
+        album_id,
+        city,
+        city_dir,
+        max_photos,
+    )
 
 
 @app.cell(hide_code=True)
@@ -119,8 +130,9 @@ def _(mo):
 
 
 @app.cell
-def _(album_id, find_album_images):
-    image_paths = find_album_images(album_id)
+def _(album_id, city, city_dir, load_yfcc_album_images, max_photos):
+    image_records = load_yfcc_album_images(city, album_id, city_dir)[:max_photos]
+    image_paths = [r.path for r in image_records]
     return (image_paths,)
 
 
@@ -137,45 +149,7 @@ def _(mo):
 
 
 @app.cell
-def _(BLIP_MODEL_NAME, Path, dataclass, encode_images, pipeline):
-    @dataclass
-    class ImageEntry:
-        path: Path
-        embedding: object
-        caption: str
-
-
-    class ImageBase:
-        def __init__(self, entries: list):
-            self.entries = entries
-
-        def __len__(self) -> int:
-            return len(self.entries)
-
-        def __iter__(self):
-            return iter(self.entries)
-    
-        def __getitem__(self, index: int):
-            return self.entries[index]
-
-        @property
-        def paths(self) -> list:
-            return [e.path for e in self.entries]
-
-        @property
-        def embeddings(self):
-            import torch
-
-            return torch.stack([e.embedding for e in self.entries])
-
-        @property
-        def captions(self) -> dict:
-            return {e.path: e.caption for e in self.entries}
-
-        def remove(self, path: Path) -> None:
-            self.entries = [e for e in self.entries if e.path != path]
-
-
+def _(BLIP_MODEL_NAME, ImageBase, ImageEntry, encode_images, pipeline):
     def load_captioner():
         return pipeline("image-text-to-text", model=BLIP_MODEL_NAME)
 
@@ -246,6 +220,10 @@ def _(AutoModelForCausalLM, AutoTokenizer, torch):
                     do_sample=True,
                     temperature=temperature,
                     pad_token_id=self.tokenizer.eos_token_id,
+
+                    #Stop the fucker from repeating the same stuff
+                    repetition_penalty=1.3,
+                    no_repeat_ngram_size=3,
                 )
 
             generated_ids = [
@@ -263,6 +241,11 @@ def _(LLMClient):
     return (client,)
 
 
+@app.cell
+def _():
+    return
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -274,18 +257,56 @@ def _(mo):
     return
 
 
-@app.function
-def build_next_step_prompt(current_caption: str, other_captions: list, max_words: int) -> str:
-    captions_text = "\n".join(f"- {c}" for c in other_captions)
-    return (
-        f"Here are other photos in this album:\n{captions_text}\n\n"
-        f"The current photo shows: {current_caption}\n\n"
-        "Write one short sentence describing what happens NEXT in the story, "
-        "after this photo. Do not describe the current photo. "
-        "Only write about things that could plausibly appear in one of the "
-        f"other photos listed.\nWrite exactly one sentence, no more than "
-        f"{max_words} words."
-    )
+@app.cell
+def _():
+    story = []
+    NEXT_STEP_PROMPT_TEMPLATE = """
+    Your task is to complete the next sentance of a story. Each time I will be giving you the current story +
+    a selection of image captions. The idea is to build a story from the images. Your task is just to generate the next sentance
+    DO NOT PUT ANYHTING ELSE IN THE RESPONSE EXCEPT THE NEXT STORY SENTANCE.
+    Be original. If the first story shows "A" don't just assume "A" will continue - you need to advance the story forward and not repeat it. If two people are rigind bikes don't continue the story with them riding bikes or if you do add something interesting.
+
+
+    Here are other photos in this album:
+    {captions_text}
+
+    The current photo shows: {current_caption}
+
+    The story up to this point is:
+    {story}
+
+    Write exactly one sentence, no more than {max_words} words."""
+
+
+    # Idea of v2 is to not pollute the context with the whole story but instead only provide the last sentence. This is to avoid the model repeating itself and to keep the story moving forward.
+    NEXT_STEP_PROMPT_TEMPLATE_V2 = """You are writing a photo story, one sentence at a time.
+
+    Last sentence of the story: {last_sentence}
+
+    Other photo captions available in this album:
+    {captions_text}
+
+    The current photo shows: {current_caption}
+
+    Write ONE new sentence continuing the story. Rules:
+    - Do not repeat any words or phrasing from the last sentence.
+    - Do not describe the current photo again.
+    - Move the story to a new action, place, or detail — not more of the same thing.
+    - Only write about things that could plausibly appear in one of the other photos listed.
+    - Output ONLY the sentence. No preamble, no quotes.
+
+    Maximum {max_words} words."""
+
+    def build_next_step_prompt(current_caption: str, other_captions: list, max_words: int, prompt:str) -> str:
+        captions_text = "\n".join(f"- {c}" for c in other_captions)
+        return prompt.format(
+            captions_text=captions_text,
+            current_caption=current_caption,
+            last_sentence=story[-1] if len(story) >0 else "(this is the first sentence)",
+            max_words=max_words,
+        )
+
+    return NEXT_STEP_PROMPT_TEMPLATE_V2, build_next_step_prompt, story
 
 
 @app.cell(hide_code=True)
@@ -305,8 +326,10 @@ def _(mo):
 def _(
     MAX_NEW_TOKENS,
     MAX_SENTENCE_WORDS,
+    NEXT_STEP_PROMPT_TEMPLATE_V2,
     NUM_STEPS,
     TEMPERATURE,
+    build_next_step_prompt,
     client,
     device,
     encode_images,
@@ -315,27 +338,31 @@ def _(
     model,
     processor,
     rank_images,
+    story,
 ):
     remaining = list(image_base)
     current_entry = remaining.pop(0)
-    story = []
     story_images = [current_entry.path]
-    for _ in range(min(NUM_STEPS, len(remaining) + 1)):
-        other_captions = [e.caption for e in remaining]
-        prompt = build_next_step_prompt(current_entry.caption, other_captions, MAX_SENTENCE_WORDS)
-        _sentence = client.generate(prompt, temperature=TEMPERATURE, max_new_tokens=MAX_NEW_TOKENS)
-        story.append(_sentence)
-        if not remaining:
-            break
-        remaining_paths = [e.path for e in remaining]
-        remaining_features = encode_images(remaining_paths, processor, model, device)
-        text_feature = encode_text(_sentence, processor, model, device)
-        best_path, score = rank_images(remaining_paths, remaining_features, text_feature, top_k=1)[0]
-        print(f'{_sentence}  ->  {best_path.name} (score={score:.4f})')
-        story_images.append(best_path)
-        current_entry = next((e for e in remaining if e.path == best_path))
-        remaining = [e for e in remaining if e.path != best_path]
-    return story, story_images
+    def run_story_loop(prompt_template: str, remaining: list, current_entry, story_images: list, story: list):
+        for _ in range(min(NUM_STEPS, len(remaining) + 1)):
+            other_captions = [e.caption for e in remaining]
+            prompt = build_next_step_prompt(current_entry.caption, other_captions, MAX_SENTENCE_WORDS, prompt_template)
+            _sentence = client.generate(prompt, temperature=TEMPERATURE, max_new_tokens=MAX_NEW_TOKENS)
+            story.append(_sentence)
+            if not remaining:
+                break
+            remaining_paths = [e.path for e in remaining]
+            remaining_features = encode_images(remaining_paths, processor, model, device)
+            text_feature = encode_text(_sentence, processor, model, device)
+            best_path, score = rank_images(remaining_paths, remaining_features, text_feature, top_k=1)[0]
+            print(f'{_sentence}  ->  {best_path.name} (score={score:.4f})')
+            story_images.append(best_path)
+            current_entry = next(e for e in remaining if e.path == best_path)
+            remaining = [e for e in remaining if e.path != best_path]
+        return story_images, story
+
+    story_images, _=run_story_loop(NEXT_STEP_PROMPT_TEMPLATE_V2, remaining, current_entry, story_images, story)
+    return (story_images,)
 
 
 @app.cell(hide_code=True)
@@ -350,21 +377,43 @@ def _(mo):
 
 
 @app.cell
-def _(Image, plt, story, story_images):
-    fig, axes = plt.subplots(1, len(story_images), figsize=(4 * len(story_images), 4))
-    if len(story_images) == 1:
-        axes = [axes]
-    for ax, path, _sentence in zip(axes, story_images, story):
-        ax.imshow(Image.open(path))
-        ax.set_title(_sentence, fontsize=9, wrap=True)
-        ax.axis('off')
-    plt.tight_layout()
-    plt.show()
+def _(image_base, mo, story, story_images):
+    def story_card(path, caption, sentence):
+        return mo.vstack([
+            mo.image(src=str(path), width=220),
+            mo.md(f"**Caption:** {caption}"),
+            mo.md(f"**LLM:** {sentence}"),
+        ], align="center")
+
+    cards = []
+    for i, (path, sentence) in enumerate(zip(story_images, story)):
+        caption = image_base.captions.get(path, "")
+        cards.append(story_card(path, caption, sentence))
+        if i < len(story_images) - 1:
+            cards.append(mo.md("### →"))
+
+    mo.hstack(cards, align="center", gap=1, wrap=True)
+    return
+
+
+@app.cell
+def _(image_base):
+    caption_list = [i.caption for i in image_base]
+    caption_list
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Clearly the problem isnot really the prompt or the llm... It just the fact that ALL THE IMAGES IN AMSTERDAM IS SOMEONE RIDING A BIKE
+    """)
     return
 
 
 @app.cell
 def _():
+        
     return
 
 

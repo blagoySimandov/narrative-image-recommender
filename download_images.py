@@ -1,23 +1,17 @@
 import argparse
-import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional, Tuple
 
 import requests
 
+from dataset_loaders import load_vist_dataset
 from models import DataModel
 
-IMAGES_ROOT = Path("images")
+IMAGES_ROOT = Path("images") / "vist"
 FAILED_LOG = Path("failed_downloads.log")
 TIMEOUT = 10
 MAX_WORKERS = 16
-
-
-def load_model(json_path: Path) -> DataModel:
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return DataModel(**data)
 
 
 def pick_url(image) -> Optional[str]:
@@ -88,6 +82,12 @@ def download_all(images: dict) -> None:
         print("Done. No failures.")
 
 
+def download_album(model: DataModel, album_id: str) -> None:
+    images = dedupe_images(model)
+    images = filter_by_albums(images, {album_id})
+    download_all(images)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("json_path", type=Path)
@@ -97,7 +97,7 @@ def parse_args() -> argparse.Namespace:
 
 def main():
     args = parse_args()
-    model = load_model(args.json_path)
+    model = load_vist_dataset(args.json_path)
     images = dedupe_images(model)
 
     album_ids = select_albums(model, args.max_albums)

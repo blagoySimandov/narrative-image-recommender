@@ -1,5 +1,4 @@
-## type: ignore
-import json
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -7,23 +6,49 @@ import torch
 from PIL import Image
 from transformers import CLIPModel, CLIPProcessor
 
-from models import DataModel
-
-IMAGES_ROOT = Path("images")
 CLIP_MODEL_NAME = "openai/clip-vit-base-patch32"
 
 
-def load_model(json_path: Path) -> DataModel:
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return DataModel(**data)
+@dataclass
+class ImageRecord:
+    path: Path
+    id: str
 
 
-def find_album_images(album_id: str) -> list:
-    album_dir = IMAGES_ROOT / album_id
-    if not album_dir.exists():
-        return []
-    return sorted(album_dir.glob("*.jpg"))
+@dataclass
+class ImageEntry:
+    path: Path
+    embedding: object
+    caption: str
+
+
+class ImageBase:
+    def __init__(self, entries: list):
+        self.entries = entries
+
+    def __len__(self) -> int:
+        return len(self.entries)
+
+    def __iter__(self):
+        return iter(self.entries)
+
+    def __getitem__(self, index: int):
+        return self.entries[index]
+
+    @property
+    def paths(self) -> list:
+        return [e.path for e in self.entries]
+
+    @property
+    def embeddings(self) -> torch.Tensor:
+        return torch.stack([e.embedding for e in self.entries])
+
+    @property
+    def captions(self) -> dict:
+        return {e.path: e.caption for e in self.entries}
+
+    def remove(self, path: Path) -> None:
+        self.entries = [e for e in self.entries if e.path != path]
 
 
 def load_clip():

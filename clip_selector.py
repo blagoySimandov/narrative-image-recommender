@@ -14,7 +14,7 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # CLIP Image Recommender
+    # CLIP Image Selector
 
     This notebook takes a text query. It finds the images in an album that
     match the query.
@@ -37,21 +37,22 @@ def _(mo):
 def _():
     from pathlib import Path
 
-    from clip_utils import (
+    from image_pipeline import (
         encode_images,
         encode_text,
-        find_album_images,
         load_clip,
         plot_results_grid,
         rank_images,
     )
+    from dataset_loaders import load_vist_album_images, load_vist_dataset
 
     return (
         Path,
         encode_images,
         encode_text,
-        find_album_images,
         load_clip,
+        load_vist_album_images,
+        load_vist_dataset,
         plot_results_grid,
         rank_images,
     )
@@ -73,7 +74,7 @@ def _(Path):
     json_path = Path("datasets/sis/test.story-in-sequence.json")
     album_id = "504823"
     top_k = 5
-    return album_id, top_k
+    return album_id, json_path, top_k
 
 
 @app.cell(hide_code=True)
@@ -104,8 +105,10 @@ def _(mo):
 
 
 @app.cell
-def _(album_id, find_album_images):
-    image_paths = find_album_images(album_id)
+def _(album_id, json_path, load_vist_album_images, load_vist_dataset):
+    vist_model = load_vist_dataset(json_path)
+    image_records = load_vist_album_images(album_id, vist_model)
+    image_paths = [r.path for r in image_records]
     image_paths
     return (image_paths,)
 

@@ -65,20 +65,68 @@ downloads fail, because some old links are dead. Check the file
 `failed_downloads.log` for the list of failures - or don't, if even if some images
 are missing it should be fine for a test.
 
-## Run the Notebook
+## Get the YFCC-Cities Dataset
+
+Download the YFCC100M-CITIES dataset from this page:
+<https://hucvl.github.io/visual-storygraphs/>
+
+Unzip the download. Put each city folder in the `datasets` folder. Each city
+folder has one CSV file for each album.
+
+## Download the YFCC-Cities Images
+
+Run this command to download the images for one city:
+
+```bash
+uv run download_yfcc_images.py datasets/yfcmmf00m-cities-amsterdam
+```
+
+Add the `--max-albums` flag to download images for only a few albums. Use
+this flag for a fast test.
+
+```bash
+uv run download_yfcc_images.py datasets/yfcmmf00m-cities-amsterdam --max-albums 5
+```
+
+The images go in the `images/yfcc` folder, in a subfolder for the city and a
+subfolder for each album. Some downloads fail, because some old links are
+dead. Check the file `failed_downloads.log` for the list of failures.
+
+### Alternatively
+
+Load the dataset via the loader function and it will download the images automatically that are missing.
+
+## Run the Photo Selector Notebook
 
 This project uses `marimo` for notebooks. A marimo notebook is a plain
 Python file, so you can edit it in any text editor.
 
-Run this command to open a notebook:
+Run this command to open the notebook:
 
 ```bash
-uv run marimo edit clip_recommend.py
+uv run marimo edit clip_selector.py
 ```
+
+This notebook takes a text query. It uses CLIP to find the matching images in
+an album.
+
+## Run the Story Ordering Notebook
+
+Run this command to open the notebook:
+
+```bash
+uv run marimo edit clip_llm_order.py
+```
+
+This notebook builds a photo story from an album. It uses BLIP to caption
+each image, and a small local LLM (Qwen2.5-0.5B-Instruct) to write the story
+one sentence at a time. After each sentence, it uses CLIP to find the closest
+remaining image and adds it to the story.
 
 ## NOTE (!Important!)
 
 Currently the project is in development.
-The only explored part is photo selection via CLIP.
+The only explored parts are photo selection via CLIP, and story ordering via
+CLIP, BLIP, and a small LLM.
 
 This repo will be used for further exploration and may diverge vastly from this initial step...
