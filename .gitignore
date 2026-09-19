@@ -9,5 +9,5 @@ failed_downloads.log
 *.pyo
 .ipynb_checkpoints
 sis
-# Generated from jupytext
-clip_recommend.ipynb
+*.ipynb
+__marimo__

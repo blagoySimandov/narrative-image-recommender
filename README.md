@@ -18,16 +18,13 @@ three text queries:
 
 ## Setup
 
-Do these steps in order.
+This project uses `uv` to manage the Python environment.
 
-1. Create a virtual environment.
-2. Activate the virtual environment.
-3. Install the project.
+1. Install `uv`. See <https://docs.astral.sh/uv/getting-started/installation/>.
+2. Run this command to install the project and its dependencies:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[notebook,dev]"
+uv sync --extra notebook --extra dev
 ```
 
 ## Get the Dataset
@@ -42,7 +39,7 @@ Put the JSON files in the `sis` folder.
 Run this command to generate `models.py` from a dataset file:
 
 ```bash
-datamodel-codegen --input sis/test.story-in-sequence.json --input-file-type json --output models.py
+uv run datamodel-codegen --input sis/test.story-in-sequence.json --input-file-type json --output models.py
 ```
 
 This command reads the JSON file. It writes Python dataclasses for the data in
@@ -53,14 +50,14 @@ the file.
 Run this command to download the images for the dataset:
 
 ```bash
-python3 download_images.py sis/test.story-in-sequence.json
+uv run download_images.py sis/test.story-in-sequence.json
 ```
 
 Add the `--max-albums` flag to download images for only a few albums. Use
 this flag for a fast test.
 
 ```bash
-python3 download_images.py sis/test.story-in-sequence.json --max-albums 5
+uv run download_images.py sis/test.story-in-sequence.json --max-albums 5
 ```
 
 The images go in the `images` folder, in a subfolder for each album. Some
@@ -70,17 +67,14 @@ are missing it should be fine for a test.
 
 ## Run the Notebook
 
-Open the notebook file in Jupyter Lab:
+This project uses `marimo` for notebooks. A marimo notebook is a plain
+Python file, so you can edit it in any text editor.
+
+Run this command to open a notebook:
 
 ```bash
-jupyter lab
+uv run marimo edit clip_recommend.py
 ```
-
-The project uses "jupytext" to convert plaintext notebooks to Jupyter.
-This allows you to edit the notebooks in your favourite text editor while
-still being able to run them in Jupyter.
-
-![jupytext-example](./docs/screenshot-jupytext-open.png)
 
 ## NOTE (!Important!)
 
