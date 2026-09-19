@@ -123,6 +123,9 @@ each image, and a small local LLM (Qwen2.5-0.5B-Instruct) to write the story
 one sentence at a time. After each sentence, it uses CLIP to find the closest
 remaining image and adds it to the story.
 
+Use the dataset picker at the top of the notebook to switch between the
+YFCC-Cities Amsterdam album and a VIST album.
+
 ## NOTE (!Important!)
 
 Currently the project is in development.
