@@ -44,7 +44,7 @@ def _():
         plot_results_grid,
         rank_images,
     )
-    from dataset_loaders import load_vist_album_images, load_vist_dataset
+    from dataset_loaders import load_vist_album_images
 
     return (
         Path,
@@ -52,7 +52,6 @@ def _():
         encode_text,
         load_clip,
         load_vist_album_images,
-        load_vist_dataset,
         plot_results_grid,
         rank_images,
     )
@@ -105,9 +104,8 @@ def _(mo):
 
 
 @app.cell
-def _(album_id, json_path, load_vist_album_images, load_vist_dataset):
-    vist_model = load_vist_dataset(json_path)
-    image_records = load_vist_album_images(album_id, vist_model)
+def _(album_id, json_path, load_vist_album_images):
+    image_records = load_vist_album_images(album_id, json_path)
     image_paths = [r.path for r in image_records]
     image_paths
     return (image_paths,)
