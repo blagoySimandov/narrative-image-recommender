@@ -32,14 +32,14 @@ uv sync --extra notebook --extra dev
 Download the VIST Story-in-Sequence dataset from this page:
 <https://visionandlanguage.net/VIST/dataset.html>
 
-Put the JSON files in the `sis` folder.
+Put the JSON files in the `sis` folder under `datasets`
 
 ## Generate the Data Models
 
 Run this command to generate `models.py` from a dataset file:
 
 ```bash
-uv run datamodel-codegen --input sis/test.story-in-sequence.json --input-file-type json --output models.py
+uv run datamodel-codegen --input datasets/sis/test.story-in-sequence.json --input-file-type json --output models.py
 ```
 
 This command reads the JSON file. It writes Python dataclasses for the data in
@@ -50,14 +50,14 @@ the file.
 Run this command to download the images for the dataset:
 
 ```bash
-uv run download_images.py sis/test.story-in-sequence.json
+uv run download_images.py datasets/sis/test.story-in-sequence.json
 ```
 
 Add the `--max-albums` flag to download images for only a few albums. Use
 this flag for a fast test.
 
 ```bash
-uv run download_images.py sis/test.story-in-sequence.json --max-albums 5
+uv run download_images.py datasets/sis/test.story-in-sequence.json --max-albums 5
 ```
 
 The images go in the `images` folder, in a subfolder for each album. Some

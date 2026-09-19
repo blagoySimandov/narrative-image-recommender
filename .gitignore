@@ -11,3 +11,4 @@ failed_downloads.log
 sis
 *.ipynb
 __marimo__
+datasets

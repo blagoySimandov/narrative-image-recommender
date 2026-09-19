@@ -70,7 +70,7 @@ def _(mo):
 
 @app.cell
 def _(Path):
-    json_path = Path("sis/test.story-in-sequence.json")
+    json_path = Path("datasets/sis/test.story-in-sequence.json")
     album_id = "504823"
     top_k = 5
     return album_id, top_k
@@ -158,7 +158,9 @@ def _(
     results_by_query = {}
     for q in queries:
         text_feature = encode_text(q, processor, model, device)
-        results_by_query[q] = rank_images(image_paths, image_features, text_feature, top_k)
+        results_by_query[q] = rank_images(
+            image_paths, image_features, text_feature, top_k
+        )
 
     plot_results_grid(results_by_query, top_k)
     return
