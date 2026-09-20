@@ -12,3 +12,4 @@ sis
 *.ipynb
 __marimo__
 datasets
+.env
