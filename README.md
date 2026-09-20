@@ -127,10 +127,73 @@ Use the dataset picker at the top of the notebook to switch between the
 YFCC-Cities Amsterdam album, a VIST album, and your own photos in
 `datasets/personal-photos` (HEIC/JPG/PNG supported).
 
+## Run the JEV Story Ordering Notebook
+
+This notebook builds a photo story by asking a decision model to pick the
+next photo, instead of generating free text and searching for the closest
+image with CLIP. It uses `typesafe/jev-1.13` through OpenRouter's alpha
+Decisions API: at each step, the model is given the story so far and the
+remaining captions, and answers a single `choice` question — "which caption
+should come next?"
+
+### Setup
+
+JEV runs through OpenRouter's API, there is no local model to train:
+
+1. Get an API key from <https://openrouter.ai/keys>.
+2. Put it in a `.env` file in the project root:
+
+```bash
+OPENROUTER_API_KEY=your-key-here
+```
+
+The notebook loads it with `python-dotenv`.
+
+### Run
+
+```bash
+uv run marimo edit jev_caption_order.py
+```
+
+1. Pick a captioning model (`base-blip` or `large-blip`) — `large-blip`
+   gives noticeably better captions.
+2. In the table, select one image as the starting point of the story.
+3. The notebook then loops: it asks JEV to pick the next caption from the
+   images not yet used, appends it to the story, and repeats for
+   `NUM_STEPS` images.
+
+There is no training step. "Running" the notebook means calling the hosted
+JEV model once per story step; the only local computation is BLIP
+captioning.
+
+### Examples
+
+Selecting a starting image in the captioned table:
+
+![JEV table selection](./docs/jev-table-selection.png)
+
+Two resulting story orderings from the same album, from two different
+starting images, picked entirely by JEV from the BLIP captions:
+
+![JEV story example 1](./docs/jev-story-example-1.png)
+![JEV story example 2](./docs/jev-story-example-2.png)
+
+### Findings
+
+- Without a CLIP re-embedding step, the story is only as good as the
+  captions: JEV can only pick between the captions it's given, so vague
+  captions ("people sitting in a room") make its choices harder to tell
+  apart.
+- Both example runs above pick a plausible narrative order (building ->
+  meeting room -> gathering -> watching TV -> cake), showing this approach
+  works as an alternative to the LLM-generation-plus-CLIP-search pipeline
+  in [Run the Story Ordering Notebook](#run-the-story-ordering-notebook).
+
 ## NOTE (!Important!)
 
 Currently the project is in development.
-The only explored parts are photo selection via CLIP, and story ordering via
-CLIP, BLIP, and a small LLM.
+The only explored parts are photo selection via CLIP, story ordering via
+CLIP, BLIP, and a small LLM, and story ordering via BLIP captions and the
+JEV decision model.
 
 This repo will be used for further exploration and may diverge vastly from this initial step...
