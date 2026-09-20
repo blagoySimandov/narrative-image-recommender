@@ -4,7 +4,10 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import torch
 from PIL import Image
+from pillow_heif import register_heif_opener
 from transformers import CLIPModel, CLIPProcessor
+
+register_heif_opener()
 
 CLIP_MODEL_NAME = "openai/clip-vit-base-patch32"
 
@@ -88,6 +91,24 @@ def rank_images(
         (image_paths[i], float(s))
         for i, s in zip(topk.indices.tolist(), topk.values.tolist())
     ]
+
+
+def story_strip(mo, story_rows):
+    """mo is passed in so this module has no hard marimo dependency."""
+
+    def story_card(path, caption):
+        return mo.vstack([
+            mo.image(src=str(path), width=220),
+            mo.md(f"**{caption}**"),
+        ], align="center")
+
+    cards = []
+    for i, row in enumerate(story_rows):
+        cards.append(story_card(row["path"], row["caption"]))
+        if i < len(story_rows) - 1:
+            cards.append(mo.md("### →"))
+
+    return mo.hstack(cards, align="center", gap=1, wrap=True)
 
 
 def plot_results_grid(results_by_query: dict, top_k: int):

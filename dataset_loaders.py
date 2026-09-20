@@ -7,6 +7,8 @@ from models import DataModel
 IMAGES_ROOT = Path("images")
 VIST_IMAGES_ROOT = IMAGES_ROOT / "vist"
 YFCC_IMAGES_ROOT = IMAGES_ROOT / "yfcc"
+PERSONAL_PHOTOS_ROOT = Path("datasets/personal-photos")
+PERSONAL_PHOTOS_EXTENSIONS = (".jpg", ".jpeg", ".png", ".heic")
 
 
 def load_vist_dataset(json_path: Path) -> DataModel:
@@ -33,6 +35,17 @@ def load_vist_album_images(
 
     download_album(load_vist_dataset(json_path), album_id)
     return _images_in(album_dir)
+
+
+def load_personal_photos_images() -> list[ImageRecord]:
+    if not PERSONAL_PHOTOS_ROOT.exists():
+        return []
+    paths = [
+        p
+        for p in sorted(PERSONAL_PHOTOS_ROOT.iterdir())
+        if p.suffix.lower() in PERSONAL_PHOTOS_EXTENSIONS
+    ]
+    return [ImageRecord(path=p, id=p.stem) for p in paths]
 
 
 def load_yfcc_album_images(

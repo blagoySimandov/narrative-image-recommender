@@ -124,7 +124,8 @@ one sentence at a time. After each sentence, it uses CLIP to find the closest
 remaining image and adds it to the story.
 
 Use the dataset picker at the top of the notebook to switch between the
-YFCC-Cities Amsterdam album and a VIST album.
+YFCC-Cities Amsterdam album, a VIST album, and your own photos in
+`datasets/personal-photos` (HEIC/JPG/PNG supported).
 
 ## NOTE (!Important!)
 

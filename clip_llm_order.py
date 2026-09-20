@@ -55,7 +55,11 @@ def _():
         load_clip,
         rank_images,
     )
-    from dataset_loaders import load_yfcc_album_images, load_vist_album_images
+    from dataset_loaders import (
+        load_personal_photos_images,
+        load_vist_album_images,
+        load_yfcc_album_images,
+    )
 
     BLIP_MODEL_NAME = "Salesforce/blip-image-captioning-base"
     return (
@@ -68,6 +72,7 @@ def _():
         encode_images,
         encode_text,
         load_clip,
+        load_personal_photos_images,
         load_vist_album_images,
         load_yfcc_album_images,
         pipeline,
@@ -89,7 +94,7 @@ def _(mo):
 @app.cell
 def _(mo):
     dataset_choice = mo.ui.radio(
-        options=["yfcc_amsterdam", "vist"],
+        options=["yfcc_amsterdam", "vist", "personal_photos"],
         value="yfcc_amsterdam",
         label="Dataset",
     )
@@ -99,7 +104,7 @@ def _(mo):
 
 @app.cell
 def _(Path, dataset_choice):
-    max_photos = 500
+    max_photos = 50
     top_k = 5
 
     NUM_STEPS = 5
@@ -107,14 +112,16 @@ def _(Path, dataset_choice):
     MAX_NEW_TOKENS = 30
     MAX_SENTENCE_WORDS = 15
 
+    city = None
+    city_dir = None
+    album_id = None
+    json_path = None
+
     if dataset_choice.value == "yfcc_amsterdam":
         city = "Amsterdam"
         city_dir = Path("datasets/yfcmmf00m-cities-amsterdam")
         album_id = "98"
-        json_path = None
-    else:
-        city = None
-        city_dir = None
+    elif dataset_choice.value == "vist":
         album_id = "72157608661271127"
         json_path = Path("datasets/sis/train.story-in-sequence.json")
     return (
@@ -159,14 +166,17 @@ def _(
     city_dir,
     dataset_choice,
     json_path,
+    load_personal_photos_images,
     load_vist_album_images,
     load_yfcc_album_images,
     max_photos,
 ):
     if dataset_choice.value == "yfcc_amsterdam":
         image_records = load_yfcc_album_images(city, album_id, city_dir)[:max_photos]
-    else:
+    elif dataset_choice.value == "vist":
         image_records = load_vist_album_images(album_id, json_path)[:max_photos]
+    else:
+        image_records = load_personal_photos_images()[:max_photos]
     image_paths = [r.path for r in image_records]
     return (image_paths,)
 
