@@ -90,7 +90,7 @@ def _(os):
                 model="typesafe/jev-1.13",
                 state={
                     "current_caption": current_caption,
-                    "story_so_far": story_so_far,
+                    "story_so_far": story_so_far, #actual string story
                     "photos_remaining_and_not_used": len(remaining),
                 },
                 questions={
