@@ -348,10 +348,11 @@ def _():
             captions_text=captions_text,
             current_caption=current_caption,
             last_sentence=story[-1] if len(story) >0 else "(this is the first sentence)",
+            story=story,
             max_words=max_words,
         )
 
-    return NEXT_STEP_PROMPT_TEMPLATE_V2, build_next_step_prompt, story
+    return NEXT_STEP_PROMPT_TEMPLATE, build_next_step_prompt, story
 
 
 @app.cell(hide_code=True)
@@ -371,7 +372,7 @@ def _(mo):
 def _(
     MAX_NEW_TOKENS,
     MAX_SENTENCE_WORDS,
-    NEXT_STEP_PROMPT_TEMPLATE_V2,
+    NEXT_STEP_PROMPT_TEMPLATE,
     NUM_STEPS,
     TEMPERATURE,
     build_next_step_prompt,
@@ -406,7 +407,7 @@ def _(
             remaining = [e for e in remaining if e.path != best_path]
         return story_images, story
 
-    story_images, _=run_story_loop(NEXT_STEP_PROMPT_TEMPLATE_V2, remaining, current_entry, story_images, story)
+    story_images, _=run_story_loop(NEXT_STEP_PROMPT_TEMPLATE, remaining, current_entry, story_images, story)
     return (story_images,)
 
 
@@ -445,6 +446,11 @@ def _(image_base, mo, story, story_images):
 def _(image_base):
     caption_list = [i.caption for i in image_base]
     caption_list
+    return
+
+
+@app.cell
+def _():
     return
 
 

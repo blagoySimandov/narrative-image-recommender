@@ -146,7 +146,8 @@ def _():
 
 
 @app.cell
-def _():
+def _(SELECT):
+    SELECT 
     return
 
 
