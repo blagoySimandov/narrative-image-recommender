@@ -101,10 +101,14 @@ Load the dataset via the loader function and it will download the images automat
 This project uses `marimo` for notebooks. A marimo notebook is a plain
 Python file, so you can edit it in any text editor.
 
+The notebooks are in the `notebooks/` folder. Each approach has its own
+folder: `explore`, `text-to-img-selection`, `llm-story-continuation`, and
+`coverage-transition-optimization`. Run all commands from the project root.
+
 Run this command to open the notebook:
 
 ```bash
-uv run marimo edit clip_selector.py
+uv run marimo edit notebooks/text-to-img-selection/clip_selector.py
 ```
 
 This notebook takes a text query. It uses CLIP to find the matching images in
@@ -115,7 +119,7 @@ an album.
 Run this command to open the notebook:
 
 ```bash
-uv run marimo edit clip_llm_order.py
+uv run marimo edit notebooks/llm-story-continuation/clip_llm_order.py
 ```
 
 This notebook builds a photo story from an album. It uses BLIP to caption
@@ -152,7 +156,7 @@ The notebook loads it with `python-dotenv`.
 ### Run
 
 ```bash
-uv run marimo edit jev_caption_order.py
+uv run marimo edit notebooks/llm-story-continuation/clip_jev_order.py
 ```
 
 1. Pick a captioning model (`base-blip` or `large-blip`) — `large-blip`
