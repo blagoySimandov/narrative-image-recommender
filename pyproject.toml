@@ -17,6 +17,8 @@ dependencies = [
     "python-dotenv",
     "scipy>=1.17.1",
     "huggingface-hub>=1.32.0",
+    "duckdb>=1.5.6",
+    "sqlglot>=30.20.0",
 ]
 
 [project.optional-dependencies]

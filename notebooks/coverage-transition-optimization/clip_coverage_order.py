@@ -111,41 +111,48 @@ def _(mo):
 
 @app.cell
 def _(SimpleNamespace, batched, combinations, np, permutations):
-    def best_in_batch(sim, transition_sim_matrix, sets, lam):
-        k = sets.shape[1]
-        # Permutations of N elements (max 20k) of class k
-        perms = np.array([p for p in permutations(range(k)) if p[0] <= p[-1]]) # [0,23,1]
+    def unique_orderings(k):
+        all_orderings = permutations(range(k))
+        # a sequence and its reverse have the same transition score, so keep one of each pair
+        return np.array([order for order in all_orderings if order[0] <= order[-1]])
 
-        #numpy magic since looping was slow as fuck
-        orders = sets[:, perms] #numpy index via array index to get permutations of the set
-        tr_all = transition_sim_matrix[orders[..., :-1], orders[..., 1:]].mean(axis=2) # 
-        tr = tr_all.max(axis=1)
-        cov = sim[:, sets].max(axis=2).mean(axis=0)
-        j = lam * cov + (1 - lam) * tr
-        b = int(j.argmax())
+    def mean_transition(transition_sim, sequences):
+        # sequences: (n_sets, n_orderings, k) -> result: (n_sets, n_orderings)
+        current_images = sequences[:, :, :-1]
+        next_images = sequences[:, :, 1:]
+        step_similarities = transition_sim[current_images, next_images]
+        return step_similarities.mean(axis=2)
 
+    def coverage(sim, candidate_sets):
+        # candidate_sets: (n_sets, k) -> sim_to_members: (n_images, n_sets, k)
+        sim_to_members = sim[:, candidate_sets]
+        nearest_member_sim = sim_to_members.max(axis=2)
+        return nearest_member_sim.mean(axis=0)
 
-
-
+    def best_in_batch(sim, transition_sim, candidate_sets, lam):
+        orderings = unique_orderings(candidate_sets.shape[1])
+        sequences = candidate_sets[:, orderings]
+        transition_per_ordering = mean_transition(transition_sim, sequences)
+        best_ordering_per_set = transition_per_ordering.argmax(axis=1)
+        transition_per_set = transition_per_ordering.max(axis=1)
+        coverage_per_set = coverage(sim, candidate_sets)
+        objective_per_set = lam * coverage_per_set + (1 - lam) * transition_per_set
+        best_set = int(objective_per_set.argmax())
         return SimpleNamespace(
-            indices=orders[b, tr_all[b].argmax()].tolist(),
-            coverage=float(cov[b]),
-            transition=float(tr[b]),
-            objective=float(j[b]),
+            indices=sequences[best_set, best_ordering_per_set[best_set]].tolist(),
+            coverage=float(coverage_per_set[best_set]),
+            transition=float(transition_per_set[best_set]),
+            objective=float(objective_per_set[best_set]),
         )
 
     def select(sim, k, lam, cap=1.0, sets=None):
-        """
-        sim - nxn sim matrix
-        k - number of images to select
-        lam - lambda
-
-        """
-        transition_sim_matrix = np.where(sim >= cap, 0, sim) # filter ij pairs with similarity that is too big.
-        sets = sets or combinations(range(len(sim)), k) # this includes 0
-        batches = batched(sets, 20_000)  # from list of N makes K lists of 20_000 each - "batching"
-        results = (best_in_batch(sim, transition_sim_matrix, np.array(b), lam) for b in batches)
-        return max(results, key=lambda r: r.objective)
+        transition_sim = np.where(sim >= cap, 0, sim)
+        candidate_sets = sets or combinations(range(len(sim)), k)
+        batches = batched(candidate_sets, 20_000)
+        batch_winners = (
+            best_in_batch(sim, transition_sim, np.array(batch), lam) for batch in batches
+        )
+        return max(batch_winners, key=lambda winner: winner.objective)
 
     return (select,)
 
@@ -265,11 +272,15 @@ def _(mo):
 @app.cell
 def _(np):
     def assign_to_picks(sim: np.ndarray, picks: list[int]) -> np.ndarray:
-        return np.asarray(picks)[sim[:, picks].argmax(axis=1)] 
+        picks = np.asarray(picks)
+        sim_to_picks = sim[:, picks]
+        nearest_pick_position = sim_to_picks.argmax(axis=1)
+        return picks[nearest_pick_position]
 
+    def group_members(owner: np.ndarray, pick: int) -> list[int]:
+        return [image for image, image_owner in enumerate(owner) if image_owner == pick]
 
-
-    return (assign_to_picks,)
+    return assign_to_picks, group_members
 
 
 @app.cell
@@ -282,31 +293,21 @@ def _(mo):
 
 
 @app.cell
-def _(album, assign_to_picks, image_grid, mo, selection, sim):
+def _(album, assign_to_picks, group_members, image_grid, mo, selection, sim):
     _paths = album["path"].to_list()
     _owner = assign_to_picks(sim, selection.indices)
-    mo.vstack(
-        [
-            mo.hstack(
-                [
-                    mo.vstack(
-                        [
-                            mo.image(src=_paths[p], width=160),
-                            mo.md(f"<small>{int((_owner == p).sum())} images</small>"),
-                        ]
-                    ),
-                    image_grid(
-                        [_paths[i] for i in (_owner == p).nonzero()[0] if i != p]
-                    ),
-                ],
-                justify="start",
-                align="start",
-                widths=[1, 5],
-            )
-            for p in selection.indices
-        ],
-        gap=1,
-    )
+
+    def _group_row(pick):
+        members = group_members(_owner, pick)
+        others = [_paths[image] for image in members if image != pick]
+        pick_card = mo.vstack(
+            [mo.image(src=_paths[pick], width=160), mo.md(f"<small>{len(members)} images</small>")]
+        )
+        return mo.hstack(
+            [pick_card, image_grid(others)], justify="start", align="start", widths=[1, 5]
+        )
+
+    mo.vstack([_group_row(pick) for pick in selection.indices], gap=1)
     return
 
 
