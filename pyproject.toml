@@ -19,11 +19,18 @@ dependencies = [
     "huggingface-hub>=1.32.0",
     "duckdb>=1.5.6",
     "sqlglot>=30.20.0",
+    "marimo>=0.24.2",
+    "scikit-learn>=1.9.1",
 ]
 
 [project.optional-dependencies]
 notebook = ["marimo"]
 dev = ["datamodel-code-generator"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["setuptools>=68"]
