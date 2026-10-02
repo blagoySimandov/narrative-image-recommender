@@ -31,20 +31,28 @@ def _(mo):
 
 @app.cell
 def _(load_cufed):
-    cufed_dataset = load_cufed()
-    cufed_dataset["context_importance"].describe()
-    return (cufed_dataset,)
+    cufed_dataset_full = load_cufed()
+    cufed_dataset_full["context_importance"].describe()
+    return (cufed_dataset_full,)
 
 
 @app.cell
-def _(cufed_dataset, mo):
-    mo.ui.table(cufed_dataset.filter(cufed_dataset["event_id"] =="0_10863444@N00"),selection="single")
+def _(cufed_dataset_full):
+    cufed_dataset_full
     return
 
 
 @app.cell
-def _(cufed_dataset):
-    filtered_cufed = cufed_dataset.filter(cufed_dataset["event_id"] =="0_10863444@N00")
+def selection(cufed_dataset_full, mo, pl):
+    selected_album = mo.ui.table(cufed_dataset_full.group_by("event_id").agg(pl.col("flickr_url").max()), selection="single")
+    selected_album
+    return (selected_album,)
+
+
+@app.cell
+def _(cufed_dataset_full, selected_album):
+
+    filtered_cufed = cufed_dataset_full.filter(cufed_dataset_full["event_id"] ==selected_album.value["event_id"])
     return (filtered_cufed,)
 
 
