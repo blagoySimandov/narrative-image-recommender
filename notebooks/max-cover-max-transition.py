@@ -56,14 +56,37 @@ def _(cufed_dataset_full, selected_album):
     return (filtered_cufed,)
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Select encodeer
+    We are using huggingface to embedd the images.
+    We are oging to use a marimo radio button to select between and test out differetn encoders
+
+
+    **NOTE**: To use DiNOv3 you need to request access from META. They usually approve fast.
+    """)
+    return
+
+
 @app.cell
-def _():
+def _(mo):
+    radiogroup = mo.ui.radio(
+        options=["facebook/dinov2-small-imagenet1k-1-layer","facebook/dinov3-vith16plus-pretrain-lvd1689m"], value="facebook/dinov2-small-imagenet1k-1-layer", label="choose one"
+    )
+
+    radiogroup
+    return (radiogroup,)
+
+
+@app.cell
+def _(radiogroup):
     from transformers import pipeline
 
 
     pipe = pipeline(
         task="image-feature-extraction",
-       model="facebook/dinov2-small-imagenet1k-1-layer",
+       model=radiogroup.value,
         pool=True,
         device=0
     )
@@ -303,16 +326,6 @@ def _(best_indexes, cde):
 def _(importance_score_kmeans, importance_score_label):
     score =   importance_score_kmeans/ importance_score_label
     score
-    return
-
-
-@app.cell
-def _():
-    return
-
-
-@app.cell
-def _():
     return
 
 
