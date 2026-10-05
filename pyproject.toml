@@ -1,7 +1,7 @@
 [project]
 name = "narrative-image-recommender"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "requests",
     "pydantic",
@@ -21,6 +21,10 @@ dependencies = [
     "sqlglot>=30.20.0",
     "marimo>=0.24.2",
     "scikit-learn>=1.9.1",
+    "kagglehub>=1.0.2",
+    "tensorflow>=2.21.0",
+    "tensorflow-hub>=0.16.1",
+    "setuptools<81",
 ]
 
 [project.optional-dependencies]

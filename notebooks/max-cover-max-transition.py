@@ -50,8 +50,12 @@ def selection(cufed_dataset_full, mo, pl):
 
 
 @app.cell
-def _(cufed_dataset_full, selected_album):
+def _():
+    return
 
+
+@app.cell
+def _(cufed_dataset_full, selected_album):
     filtered_cufed = cufed_dataset_full.filter(cufed_dataset_full["event_id"] ==selected_album.value["event_id"])
     return (filtered_cufed,)
 
@@ -123,7 +127,7 @@ def _(cd_with_paths, pipe, pl):
     vecs = []
     for emb in tqdm(pipe(paths, batch_size=10, return_tensors=True), total=len(paths)):
         vecs.append(emb.squeeze(0).detach().cpu().numpy())
-    
+
     cde = cd_with_paths.with_columns(
         pl.Series("embedding", np.stack(vecs))
     )
@@ -175,7 +179,13 @@ def _(cde, k):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Go through the K cluster centers and similarity match them to the dataset
+    # Pick the iconic imags
+    Currently we pick the iconic images by selecting the ones wich best cover the dataset.
+    In our case these would be the images that are closest to each centroid.
+
+
+
+    Go through the K cluster centers and similarity match them to the dataset
     """)
     return
 
@@ -232,13 +242,7 @@ def _(best_indexes, kmeans):
         cluster_id = kmeans.labels_[l] 
         iconic_image = best_indexes[cluster_id]
         grouped_images[iconic_image].append(l)
-    
     return (grouped_images,)
-
-
-@app.cell
-def _():
-    return
 
 
 @app.cell(hide_code=True)
@@ -295,10 +299,7 @@ def _(cde, k, pl):
     selected = cde.select(
         pl.all().top_k_by("context_importance", k.value)
     )
-
     selected
-
-
     return (selected,)
 
 
@@ -326,6 +327,138 @@ def _(best_indexes, cde):
 def _(importance_score_kmeans, importance_score_label):
     score =   importance_score_kmeans/ importance_score_label
     score
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Picking Iconic Images via Aesthetic scoring each cluster
+    After we generate the clusters using KMeans a better way to pick each iconic image would be via an aesthetic scorer
+    We can run it on the clustered images.
+    """)
+    return
+
+
+@app.cell
+def _():
+    # code was "inspired" from
+    # https://www.kaggle.com/code/neocosmliang/image-aesthetic-scoring-with-musiq-models
+    import tensorflow as tf
+    import tensorflow_hub as hub
+
+    model_handle = "https://www.kaggle.com/models/google/musiq/tensorFlow2/koniq-10k/1"
+    model = hub.load(model_handle)
+    predict_fn = model.signatures['serving_default']
+    return predict_fn, tf
+
+
+@app.cell
+def _(cde, pl):
+    from pathlib import Path
+    def path_to_bytes(path: str) -> bytes:
+        return Path(path).expanduser().read_bytes()
+    img_df = cde.with_columns(
+        (pl.col("path").map_elements(path_to_bytes,return_dtype=pl.Binary).alias("img_bytes"))
+    )
+
+    return (img_df,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Find the most aesthetic photo in each cluster
+    Use MUSIQ from Google to find the most aesthetic photo from each cluster
+    """)
+    return
+
+
+@app.cell
+def _(img_df, kmeans, pl, predict_fn, tf):
+    def score_bytes(b: bytes) -> float:
+        return float(list(predict_fn(tf.constant(b)).values())[0].numpy())
+    
+    img_df_scores = img_df.with_columns(
+        pl.col("img_bytes").map_elements(score_bytes, return_dtype=pl.Float64).alias("musiq_score"),
+        pl.Series("cluster", kmeans.labels_).cast(pl.Int64)
+    )
+    
+
+    return (img_df_scores,)
+
+
+@app.cell
+def _(img_df_scores):
+    best = (
+        img_df_scores
+        .sort("musiq_score", descending=True)
+        .group_by("cluster", maintain_order=True)
+        .first()
+        .sort("cluster")
+    )
+    best
+    return (best,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Code below is AI generated<<<
+    """)
+    return
+
+
+@app.cell
+def _(best, cde, grouped_images, kmeans, mo):
+    # cluster id -> iconic index (key of grouped_images)
+    _gi_by_cluster = {int(kmeans.labels_[_gi]): _gi for _gi in grouped_images}
+
+    _blocks = []
+
+    for _r in best.sort("musiq_score", descending=True).iter_rows(named=True):
+        _cluster_id = int(_r["cluster"])
+        _gi = _gi_by_cluster.get(_cluster_id)
+        if _gi is None:
+            continue
+
+        _header = mo.md(
+            f"### ⭐ Cluster {_cluster_id}: MUSIQ {_r['musiq_score']:.1f}"
+        )
+
+        _best_ui = mo.vstack([
+            mo.md("**MUSIQ Match:**"),
+            mo.image(src=_r["path"], width=180, height=180),
+        ], align="center")
+
+        _iconic_row = cde.row(_gi, named=True)
+        _iconic_ui = mo.vstack([
+            mo.md(f"*Centroid-closest (idx {_gi})*"),
+            mo.image(src=_iconic_row["path"], width=100, height=100),
+        ], align="center")
+
+        _member_images = [
+            mo.image(src=cde.row(_i, named=True)["path"], width=100, height=100)
+            for _i in grouped_images[_gi]
+        ]
+
+        _members_gallery = mo.vstack([
+            mo.md(f"**Cluster Members:** ({len(_member_images)})"),
+            mo.hstack(_member_images, wrap=True, gap=1),
+        ])
+
+        _blocks.append(mo.vstack([
+            _header,
+            mo.hstack([_best_ui, _iconic_ui, _members_gallery], gap=3, align="start"),
+            mo.md("---"),
+        ]))
+
+    mo.vstack(_blocks)
+    return
+
+
+@app.cell
+def _():
     return
 
 
