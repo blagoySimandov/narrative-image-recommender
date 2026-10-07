@@ -15,8 +15,8 @@ def _():
 
 @app.cell
 def _(Path):
-    BASE = "/Users/blagoy/github.com/blagoySimandov/instagram-posts-scraper"
-    parquet_path = Path(BASE,'profiles.parquet')
+    BASE = "./datasets/"
+    parquet_path = Path(BASE,'instagram.parquet')
     return (parquet_path,)
 
 
@@ -33,10 +33,11 @@ def _(mo, parquet_path):
           p.likes,
           p.comments,
           img_idx,
-          img AS image_url
+          img,
+        img.url as url 
         FROM read_parquet('{parquet_path}') AS prof,
           unnest(prof.posts) AS t(p),
-          unnest(p.images) WITH ORDINALITY AS i(img, img_idx)
+          unnest(p.images) WITH ORDINALITY AS i(img, img_idx),
         """
     )
     return
