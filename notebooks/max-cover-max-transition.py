@@ -9,7 +9,6 @@ def _():
     import marimo as mo
     import polars as pl
     from dataset_loaders import load_cufed
-    import torch
 
     return load_cufed, mo, pl
 
@@ -17,14 +16,14 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Cufed dataset
-    Created by mechanical turk people. 3 people labeled the type of location of the album - we don't use this
+    # CUFED dataset
+    Mechanical Turk workers created the labels. 3 workers labeled the location type of each album. We do not use this label.
 
-    Has importance score + label of location.
+    Each image has an importance score and a location label.
 
-    Importance score tries to measure how important an image is to identify the event.
+    The importance score shows how important an image is to identify the event.
 
-    5 workers labeled the importance score. It was then averaged.
+    5 workers labeled the importance score. The dataset gives the average.
     """)
     return
 
@@ -50,159 +49,153 @@ def selection(cufed_dataset_full, mo, pl):
 
 
 @app.cell
+def _(mo, selected_album):
+    mo.stop(len(selected_album.value) is 0)
+    return
+
+
+@app.cell
 def _():
     return
 
 
 @app.cell
 def _(cufed_dataset_full, selected_album):
-    filtered_cufed = cufed_dataset_full.filter(cufed_dataset_full["event_id"] ==selected_album.value["event_id"])
-    return (filtered_cufed,)
+    album_cufed = cufed_dataset_full.filter(cufed_dataset_full["event_id"] == selected_album.value["event_id"])
+    return (album_cufed,)
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Select encodeer
-    We are using huggingface to embedd the images.
-    We are oging to use a marimo radio button to select between and test out differetn encoders
+    # Select encoder
+    We use Hugging Face to embed the images.
+    Use the marimo radio button to select an encoder and compare different encoders.
 
 
-    **NOTE**: To use DiNOv3 you need to request access from META. They usually approve fast.
+    **NOTE**: To use DINOv3, request access from Meta. Meta usually approves fast.
     """)
     return
 
 
 @app.cell
 def _(mo):
-    radiogroup = mo.ui.radio(
-        options=["facebook/dinov2-small-imagenet1k-1-layer","facebook/dinov3-vith16plus-pretrain-lvd1689m"], value="facebook/dinov2-small-imagenet1k-1-layer", label="choose one"
-    )
-
-    radiogroup
-    return (radiogroup,)
+    encoders = [
+        "facebook/dinov2-small-imagenet1k-1-layer",
+        "facebook/dinov3-vith16plus-pretrain-lvd1689m",
+    ]
+    encoder_radio = mo.ui.radio(options=encoders, value=encoders[0], label="choose one")
+    encoder_radio
+    return (encoder_radio,)
 
 
 @app.cell
-def _(radiogroup):
+def _(encoder_radio):
     from transformers import pipeline
-
 
     pipe = pipeline(
         task="image-feature-extraction",
-       model=radiogroup.value,
+        model=encoder_radio.value,
         pool=True,
-        device=0
+        device=0,
     )
-
-    #pipe(url)
     return (pipe,)
 
 
 @app.cell
-def _(filtered_cufed):
-    cd_with_paths = filtered_cufed.with_columns(
-        ("./" + filtered_cufed["path"])
+def _(album_cufed):
+    cufed_paths = album_cufed.with_columns(
+        ("./" + album_cufed["path"])
     )
-    cd_with_paths["path"]
-    return (cd_with_paths,)
+    cufed_paths["path"]
+    return (cufed_paths,)
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Embed the dataset using dingov2
-    Embed + store the embeddings in the embedding column
+    # Embed the dataset
+    Embed the images with the selected encoder and store the result in the `embedding` column.
     """)
     return
 
 
 @app.cell
-def _(cd_with_paths, pipe, pl):
+def _(cufed_paths, pipe, pl):
     import numpy as np
     from tqdm.auto import tqdm
 
-    paths = cd_with_paths["path"].to_list()
+    paths = cufed_paths["path"].to_list()
 
     vecs = []
     for emb in tqdm(pipe(paths, batch_size=10, return_tensors=True), total=len(paths)):
         vecs.append(emb.squeeze(0).detach().cpu().numpy())
 
-    cde = cd_with_paths.with_columns(
+    cufed_emb = cufed_paths.with_columns(
         pl.Series("embedding", np.stack(vecs))
     )
-    return cde, np
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    #
-    """)
-    return
+    return cufed_emb, np
 
 
 @app.cell
-def _(cde):
-    cde
+def _(cufed_emb):
+    cufed_emb
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Create the algorithm for Max Coverage
-    Run K means to cluster the photos' embeddings and find the "inconic images".
-    First select k
+    # Max coverage algorithm
+    Run k-means on the image embeddings to find the "iconic images".
+    First, select k.
     """)
     return
 
 
 @app.cell
 def _(mo):
-    k = mo.ui.slider(label="k",start=1, stop=10, step=1, value=5) # default to 5k
+    k = mo.ui.slider(label="k", start=1, stop=10, step=1, value=5)
     k
     return (k,)
 
 
 @app.cell
-def _(cde, k):
+def _(cufed_emb, k):
     from sklearn.cluster import KMeans
-    from sklearn.metrics.pairwise import cosine_similarity
 
-    #https://scikit-learn.org/stable/modules/generated/sklearn.cluster.KMeans.html#:~:text=the%20training%20set.-,Examples,-%3E%3E%3E%20from%20sklearn
-
-    kmeans = KMeans(n_clusters=k.value, random_state=0, n_init="auto").fit(cde["embedding"])
-    return cosine_similarity, kmeans
+    # https://scikit-learn.org/stable/modules/generated/sklearn.cluster.KMeans.html
+    kmeans = KMeans(n_clusters=k.value, random_state=0, n_init="auto").fit(cufed_emb["embedding"])
+    return (kmeans,)
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Pick the iconic imags
-    Currently we pick the iconic images by selecting the ones wich best cover the dataset.
-    In our case these would be the images that are closest to each centroid.
+    # Pick the iconic images
+    We pick the iconic images that cover the dataset best.
+    These are the images closest to each centroid.
 
-
-
-    Go through the K cluster centers and similarity match them to the dataset
+    For each of the k cluster centers, find the most similar image in the dataset.
     """)
     return
 
 
 @app.cell
-def _(cde, cosine_similarity, kmeans, np):
-    similarity_matrix = cosine_similarity(kmeans.cluster_centers_, cde["embedding"])
+def _(cufed_emb, kmeans, np):
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    similarity_matrix = cosine_similarity(kmeans.cluster_centers_, cufed_emb["embedding"])
     print(similarity_matrix.shape)
-    best_indexes = np.argmax(similarity_matrix,axis=1)
-    cde[best_indexes]
-    return (best_indexes,)
+    iconic_indexes = np.argmax(similarity_matrix, axis=1)
+    cufed_emb[iconic_indexes]
+    return iconic_indexes, similarity_matrix
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # See the silhoute score
+    # Silhouette score
 
     **From the docs**
 
@@ -226,116 +219,83 @@ def _(mo):
 
 
 @app.cell
-def _(cde, kmeans, np):
+def _(cufed_emb, kmeans, np):
     from sklearn.metrics import silhouette_score
-    silhouette_score(np.vstack(cde["embedding"].to_numpy()), kmeans.labels_)
+
+    silhouette_score(np.vstack(cufed_emb["embedding"].to_numpy()), kmeans.labels_)
     return
 
 
 @app.cell
-def _(best_indexes, kmeans):
+def _(kmeans):
     from collections import defaultdict
 
-    grouped_images = defaultdict(list)
+    cluster_members = defaultdict(list)
 
-    for l in range(len(kmeans.labels_)):
-        cluster_id = kmeans.labels_[l] 
-        iconic_image = best_indexes[cluster_id]
-        grouped_images[iconic_image].append(l)
-    return (grouped_images,)
+    for image_idx, cluster_id in enumerate(kmeans.labels_):
+        cluster_members[int(cluster_id)].append(image_idx)
+    return (cluster_members,)
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Showcase the groupings
-    Code in the cell below was fully generated by AI
+    # Show the groups
+    The helper functions in the next cell make the galleries. AI generated the first version of this code.
     """)
     return
 
 
 @app.cell
-def _(cde, grouped_images, kmeans, mo):
-    marimo_output = []
+def _(mo):
+    def image_column(title, path, size):
+        return mo.vstack([mo.md(title), mo.image(src=path, width=size, height=size)], align="center")
 
-    for gi in sorted(grouped_images.keys()):
-        iconic_row = cde.row(gi, named=True)
-        cluster_id_new = kmeans.labels_[gi]
-        header = mo.md(f"### 🌟 Cluster {cluster_id_new} (Iconic Image Index: {gi})")
-        iconic_img_ui = mo.vstack([
-            mo.md("**Iconic Match:**"),
-            mo.image(src=iconic_row["path"], width=180, height=180)
-        ], align="center")
-        member_images = []
-        for member_idx in grouped_images[gi]:
-            member_row = cde.row(member_idx, named=True)
-            img = mo.image(src=member_row["path"], width=100, height=100)
-            member_images.append(img)
+    def cluster_block(header, featured, member_paths):
+        member_images = [mo.image(src=path, width=100, height=100) for path in member_paths]
         members_gallery = mo.vstack([
-            mo.md("**Cluster Members:**"),
-            mo.hstack(member_images, wrap=True, gap=1)
+            mo.md(f"**Cluster Members:** ({len(member_images)})"),
+            mo.hstack(member_images, wrap=True, gap=1),
         ])
-        cluster_block = mo.vstack([
-            header,
-            mo.hstack([iconic_img_ui, members_gallery], gap=3, align="start"),
-            mo.md("---") # Visual separator
+        return mo.vstack([
+            mo.md(header),
+            mo.hstack([*featured, members_gallery], gap=3, align="start"),
+            mo.md("---"),
         ])
-        marimo_output.append(cluster_block)
-    mo.vstack(marimo_output)
+
+    return cluster_block, image_column
+
+
+@app.cell
+def _(
+    cluster_block,
+    cluster_members,
+    cufed_emb,
+    iconic_indexes,
+    image_column,
+    mo,
+):
+    _paths = cufed_emb["path"]
+    _blocks = []
+
+    for _cluster_id, _members in sorted(cluster_members.items()):
+        _iconic_idx = int(iconic_indexes[_cluster_id])
+        _blocks.append(cluster_block(
+            f"### Cluster {_cluster_id} (Iconic Image Index: {_iconic_idx})",
+            [image_column("**Iconic Match:**", _paths[_iconic_idx], 180)],
+            _paths.gather(_members).to_list(),
+        ))
+
+    mo.vstack(_blocks)
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Eval
-    Let's now match the iconic images to their importance as labeled by the cufed dataset
-    """)
-    return
-
-
-@app.cell
-def _(cde, k, pl):
-    selected = cde.select(
-        pl.all().top_k_by("context_importance", k.value)
-    )
-    selected
-    return (selected,)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    Let's now take their sum and compare to the sum of our selection
-    """)
-    return
-
-
-@app.cell
-def _(selected):
-    importance_score_label = selected.sum()["context_importance"]
-    return (importance_score_label,)
-
-
-@app.cell
-def _(best_indexes, cde):
-    importance_score_kmeans = cde[best_indexes].sum()['context_importance']
-    return (importance_score_kmeans,)
-
-
-@app.cell
-def _(importance_score_kmeans, importance_score_label):
-    score =   importance_score_kmeans/ importance_score_label
-    score
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    # Picking Iconic Images via Aesthetic scoring each cluster
-    After we generate the clusters using KMeans a better way to pick each iconic image would be via an aesthetic scorer
-    We can run it on the clustered images.
+    # Pick iconic images with aesthetic scores
+    After k-means makes the clusters, an aesthetic scorer can be a better way to pick each iconic image.
+    We run the scorer on the images in each cluster.
     """)
     return
 
@@ -349,19 +309,20 @@ def _():
 
     model_handle = "https://www.kaggle.com/models/google/musiq/tensorFlow2/koniq-10k/1"
     model = hub.load(model_handle)
-    predict_fn = model.signatures['serving_default']
+    predict_fn = model.signatures["serving_default"]
     return predict_fn, tf
 
 
 @app.cell
-def _(cde, pl):
+def _(cufed_emb, pl):
     from pathlib import Path
+
     def path_to_bytes(path: str) -> bytes:
         return Path(path).expanduser().read_bytes()
-    img_df = cde.with_columns(
-        (pl.col("path").map_elements(path_to_bytes,return_dtype=pl.Binary).alias("img_bytes"))
-    )
 
+    img_df = cufed_emb.with_columns(
+        pl.col("path").map_elements(path_to_bytes, return_dtype=pl.Binary).alias("img_bytes")
+    )
     return (img_df,)
 
 
@@ -369,91 +330,176 @@ def _(cde, pl):
 def _(mo):
     mo.md(r"""
     # Find the most aesthetic photo in each cluster
-    Use MUSIQ from Google to find the most aesthetic photo from each cluster
+    Use MUSIQ from Google to find the most aesthetic photo in each cluster.
     """)
     return
 
 
 @app.cell
-def _(img_df, kmeans, pl, predict_fn, tf):
+def _(img_df, kmeans, np, pl, predict_fn, similarity_matrix, tf):
     def score_bytes(b: bytes) -> float:
         return float(list(predict_fn(tf.constant(b)).values())[0].numpy())
-    
+
     img_df_scores = img_df.with_columns(
         pl.col("img_bytes").map_elements(score_bytes, return_dtype=pl.Float64).alias("musiq_score"),
-        pl.Series("cluster", kmeans.labels_).cast(pl.Int64)
+        pl.Series("cluster", kmeans.labels_).cast(pl.Int64),
+        pl.Series("centroid_similarity", similarity_matrix[kmeans.labels_, np.arange(len(kmeans.labels_))]),
     )
-    
-
     return (img_df_scores,)
 
 
 @app.cell
 def _(img_df_scores):
-    best = (
+    musiq_best = (
         img_df_scores
         .sort("musiq_score", descending=True)
         .group_by("cluster", maintain_order=True)
         .first()
         .sort("cluster")
     )
-    best
-    return (best,)
+    musiq_best
+    return (musiq_best,)
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Code below is AI generated<<<
+    Show each cluster with its MUSIQ match and its centroid-closest image.
     """)
     return
 
 
 @app.cell
-def _(best, cde, grouped_images, kmeans, mo):
-    # cluster id -> iconic index (key of grouped_images)
-    _gi_by_cluster = {int(kmeans.labels_[_gi]): _gi for _gi in grouped_images}
-
+def _(
+    cluster_block,
+    cluster_members,
+    cufed_emb,
+    iconic_indexes,
+    image_column,
+    mo,
+    musiq_best,
+):
+    _paths = cufed_emb["path"]
     _blocks = []
 
-    for _r in best.sort("musiq_score", descending=True).iter_rows(named=True):
-        _cluster_id = int(_r["cluster"])
-        _gi = _gi_by_cluster.get(_cluster_id)
-        if _gi is None:
-            continue
-
-        _header = mo.md(
-            f"### ⭐ Cluster {_cluster_id}: MUSIQ {_r['musiq_score']:.1f}"
-        )
-
-        _best_ui = mo.vstack([
-            mo.md("**MUSIQ Match:**"),
-            mo.image(src=_r["path"], width=180, height=180),
-        ], align="center")
-
-        _iconic_row = cde.row(_gi, named=True)
-        _iconic_ui = mo.vstack([
-            mo.md(f"*Centroid-closest (idx {_gi})*"),
-            mo.image(src=_iconic_row["path"], width=100, height=100),
-        ], align="center")
-
-        _member_images = [
-            mo.image(src=cde.row(_i, named=True)["path"], width=100, height=100)
-            for _i in grouped_images[_gi]
-        ]
-
-        _members_gallery = mo.vstack([
-            mo.md(f"**Cluster Members:** ({len(_member_images)})"),
-            mo.hstack(_member_images, wrap=True, gap=1),
-        ])
-
-        _blocks.append(mo.vstack([
-            _header,
-            mo.hstack([_best_ui, _iconic_ui, _members_gallery], gap=3, align="start"),
-            mo.md("---"),
-        ]))
+    for _row in musiq_best.sort("musiq_score", descending=True).iter_rows(named=True):
+        _cluster_id = _row["cluster"]
+        _iconic_idx = int(iconic_indexes[_cluster_id])
+        _blocks.append(cluster_block(
+            f"### Cluster {_cluster_id}: MUSIQ {_row['musiq_score']:.1f}",
+            [
+                image_column("**MUSIQ Match:**", _row["path"], 180),
+                image_column(f"*Centroid-closest (idx {_iconic_idx})*", _paths[_iconic_idx], 100),
+            ],
+            _paths.gather(cluster_members[_cluster_id]).to_list(),
+        ))
 
     mo.vstack(_blocks)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Weigh the aesthetic score against the similarity to the centroid
+
+    $$
+    \text{score} = w_1 \cdot \text{sim} + w_2 \cdot \text{aesthetic}
+    $$
+
+    We pick the image with the highest score in each cluster.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    simw = mo.ui.slider(label="similarity weight", start=0.0, stop=1.0, step=0.01, value=0.5)
+    return (simw,)
+
+
+@app.cell
+def _(img_df_scores, pl):
+    from sklearn.preprocessing import MinMaxScaler
+    cols_to_normalize = ["centroid_similarity", "musiq_score"]
+    scaled = MinMaxScaler().fit_transform(img_df_scores.select(cols_to_normalize).to_numpy())
+
+    img_df_scores_scaled = img_df_scores.with_columns(
+        pl.Series("centroid_similarity_scaled", scaled[:, 0]),
+        pl.Series("musiq_score_scaled", scaled[:, 1])
+    )
+    img_df_scores_scaled.select("centroid_similarity_scaled","musiq_score_scaled")
+
+    return (img_df_scores_scaled,)
+
+
+@app.cell
+def _(img_df_scores_scaled, pl, simw):
+    def weighted_score(similarity_weight: float) -> pl.Expr:
+        return (
+            similarity_weight * pl.col("centroid_similarity_scaled")
+            + (1-similarity_weight) * pl.col("musiq_score_scaled")
+        ).alias("weighted_score")
+
+
+    img_df_weighted = img_df_scores_scaled.with_columns(
+        weighted_score(simw.value)
+    )
+    return (img_df_weighted,)
+
+
+@app.cell
+def _(img_df_weighted):
+    cleaned = img_df_weighted.select("flickr_url", "weighted_score","cluster","path") # makes it faster
+    weighted_best = (
+            cleaned
+            .sort("weighted_score", descending=True)
+            .group_by("cluster", maintain_order=True)
+            .first()
+            .sort("cluster")
+        )
+    weighted_best
+    return (weighted_best,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Code below is ai generated
+    """)
+    return
+
+
+@app.cell
+def _(
+    cluster_block,
+    cluster_members,
+    cufed_emb,
+    iconic_indexes,
+    image_column,
+    mo,
+    musiq_best,
+    simw,
+    weighted_best,
+):
+    _paths = cufed_emb["path"]
+    _musiq_paths = dict(zip(musiq_best["cluster"], musiq_best["path"]))
+    _blocks = []
+
+    for _row in weighted_best.sort("weighted_score", descending=True).iter_rows(named=True):
+        _cluster_id = _row["cluster"]
+        _iconic_idx = int(iconic_indexes[_cluster_id])
+        _blocks.append(cluster_block(
+            f"### Cluster {_cluster_id}: weighted {_row['weighted_score']:.2f}",
+            [
+                image_column("**Weighted Match:**", _row["path"], 180),
+                image_column("*MUSIQ match*", _musiq_paths[_cluster_id], 100),
+                image_column(f"*Centroid-closest (idx {_iconic_idx})*", _paths[_iconic_idx], 100),
+            ],
+            _paths.gather(cluster_members[_cluster_id]).to_list(),
+        ))
+
+    mo.vstack([simw, *_blocks])
     return
 
 
