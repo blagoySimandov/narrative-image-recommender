@@ -504,6 +504,22 @@ def _(
 
 
 @app.cell
+def _(img_df_scores_scaled):
+    from PIL import Image
+    _ex_img1 = Image.open(img_df_scores_scaled[0, "path"])
+
+    for tag_id, value in _ex_img1.getexif():
+        tag_name = Image.ExifTags.TAGS.get(tag_id, tag_id) 
+        print(tag_name, ":", value)
+
+    print(_ex_img1.format)
+    print(_ex_img1.size)
+    print(_ex_img1.mode)
+    print(_ex_img1.info)
+    return
+
+
+@app.cell
 def _():
     return
 
