@@ -8,9 +8,9 @@ app = marimo.App(width="full")
 def _():
     import marimo as mo
     import polars as pl
-    from dataset_loaders import load_cufed
+    from dataset_loaders import load_cufed, load_yfcc_city
 
-    return load_cufed, mo, pl
+    return load_cufed, load_yfcc_city, mo, pl
 
 
 @app.cell(hide_code=True)
@@ -28,22 +28,56 @@ def _(mo):
     return
 
 
-@app.cell
-def _(load_cufed):
-    cufed_dataset_full = load_cufed()
-    cufed_dataset_full["context_importance"].describe()
-    return (cufed_dataset_full,)
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # YFCC100M city datasets
+    Each city is one album of approximately 100 Flickr photos from one owner.
+    The cities are Amsterdam, Istanbul, Paris, Tokyo, and Venice.
+    The loader downloads missing images to `images/yfcc/<City>/<City>`.
+    The loader removes the images that it cannot download.
 
-
-@app.cell
-def _(cufed_dataset_full):
-    cufed_dataset_full
+    **NOTE**: Flickr deleted all the Paris images. Paris shows no images.
+    """)
     return
 
 
 @app.cell
-def selection(cufed_dataset_full, mo, pl):
-    selected_album = mo.ui.table(cufed_dataset_full.group_by("event_id").agg(pl.col("flickr_url").max()), selection="single")
+def _(load_cufed, load_yfcc_city, mo):
+    from functools import partial
+
+    from dataset_loaders import YFCC_CITIES
+
+    dataset_loaders = {"CUFED": load_cufed} | {
+        f"YFCC100M {city}": partial(load_yfcc_city, city) for city in YFCC_CITIES
+    }
+    dataset_radio = mo.ui.radio(options=dataset_loaders, value="CUFED", label="choose a dataset")
+    dataset_radio
+    return (dataset_radio,)
+
+
+@app.cell
+def _(dataset_radio, mo):
+    dataset_full = dataset_radio.value()
+    mo.stop(dataset_full.is_empty(), mo.md("**No images found for this dataset.**"))
+    return (dataset_full,)
+
+
+@app.cell
+def _(dataset_full):
+    dataset_full.describe()
+    return
+
+
+@app.cell
+def _(dataset_full):
+    dataset_full
+    return
+
+
+@app.cell
+def selection(dataset_full, mo, pl):
+    selected_album = mo.ui.table(dataset_full.group_by("event_id").agg(pl.col("flickr_url").max()), selection="single")
     selected_album
     return (selected_album,)
 
@@ -60,9 +94,9 @@ def _():
 
 
 @app.cell
-def _(cufed_dataset_full, selected_album):
-    album_cufed = cufed_dataset_full.filter(cufed_dataset_full["event_id"] == selected_album.value["event_id"])
-    return (album_cufed,)
+def _(dataset_full, selected_album):
+    album = dataset_full.filter(dataset_full["event_id"] == selected_album.value["event_id"])
+    return (album,)
 
 
 @app.cell(hide_code=True)
@@ -103,12 +137,12 @@ def _(encoder_radio):
 
 
 @app.cell
-def _(album_cufed):
-    cufed_paths = album_cufed.with_columns(
-        ("./" + album_cufed["path"])
+def _(album):
+    album_paths = album.with_columns(
+        ("./" + album["path"])
     )
-    cufed_paths["path"]
-    return (cufed_paths,)
+    album_paths["path"]
+    return (album_paths,)
 
 
 @app.cell(hide_code=True)
@@ -121,25 +155,25 @@ def _(mo):
 
 
 @app.cell
-def _(cufed_paths, pipe, pl):
+def _(album_paths, pipe, pl):
     import numpy as np
     from tqdm.auto import tqdm
 
-    paths = cufed_paths["path"].to_list()
+    paths = album_paths["path"].to_list()
 
     vecs = []
     for emb in tqdm(pipe(paths, batch_size=10, return_tensors=True), total=len(paths)):
         vecs.append(emb.squeeze(0).detach().cpu().numpy())
 
-    cufed_emb = cufed_paths.with_columns(
+    album_emb = album_paths.with_columns(
         pl.Series("embedding", np.stack(vecs))
     )
-    return cufed_emb, np
+    return album_emb, np
 
 
 @app.cell
-def _(cufed_emb):
-    cufed_emb
+def _(album_emb):
+    album_emb
     return
 
 
@@ -161,11 +195,11 @@ def _(mo):
 
 
 @app.cell
-def _(cufed_emb, k):
+def _(album_emb, k):
     from sklearn.cluster import KMeans
 
     # https://scikit-learn.org/stable/modules/generated/sklearn.cluster.KMeans.html
-    kmeans = KMeans(n_clusters=k.value, random_state=0, n_init="auto").fit(cufed_emb["embedding"])
+    kmeans = KMeans(n_clusters=k.value, random_state=0, n_init="auto").fit(album_emb["embedding"])
     return (kmeans,)
 
 
@@ -182,13 +216,13 @@ def _(mo):
 
 
 @app.cell
-def _(cufed_emb, kmeans, np):
+def _(album_emb, kmeans, np):
     from sklearn.metrics.pairwise import cosine_similarity
 
-    similarity_matrix = cosine_similarity(kmeans.cluster_centers_, cufed_emb["embedding"])
+    similarity_matrix = cosine_similarity(kmeans.cluster_centers_, album_emb["embedding"])
     print(similarity_matrix.shape)
     iconic_indexes = np.argmax(similarity_matrix, axis=1)
-    cufed_emb[iconic_indexes]
+    album_emb[iconic_indexes]
     return iconic_indexes, similarity_matrix
 
 
@@ -219,10 +253,10 @@ def _(mo):
 
 
 @app.cell
-def _(cufed_emb, kmeans, np):
+def _(album_emb, kmeans, np):
     from sklearn.metrics import silhouette_score
 
-    silhouette_score(np.vstack(cufed_emb["embedding"].to_numpy()), kmeans.labels_)
+    silhouette_score(np.vstack(album_emb["embedding"].to_numpy()), kmeans.labels_)
     return
 
 
@@ -270,12 +304,12 @@ def _(mo):
 def _(
     cluster_block,
     cluster_members,
-    cufed_emb,
+    album_emb,
     iconic_indexes,
     image_column,
     mo,
 ):
-    _paths = cufed_emb["path"]
+    _paths = album_emb["path"]
     _blocks = []
 
     for _cluster_id, _members in sorted(cluster_members.items()):
@@ -314,13 +348,13 @@ def _():
 
 
 @app.cell
-def _(cufed_emb, pl):
+def _(album_emb, pl):
     from pathlib import Path
 
     def path_to_bytes(path: str) -> bytes:
         return Path(path).expanduser().read_bytes()
 
-    img_df = cufed_emb.with_columns(
+    img_df = album_emb.with_columns(
         pl.col("path").map_elements(path_to_bytes, return_dtype=pl.Binary).alias("img_bytes")
     )
     return (img_df,)
@@ -373,13 +407,13 @@ def _(mo):
 def _(
     cluster_block,
     cluster_members,
-    cufed_emb,
+    album_emb,
     iconic_indexes,
     image_column,
     mo,
     musiq_best,
 ):
-    _paths = cufed_emb["path"]
+    _paths = album_emb["path"]
     _blocks = []
 
     for _row in musiq_best.sort("musiq_score", descending=True).iter_rows(named=True):
@@ -474,7 +508,7 @@ def _(mo):
 def _(
     cluster_block,
     cluster_members,
-    cufed_emb,
+    album_emb,
     iconic_indexes,
     image_column,
     mo,
@@ -482,7 +516,7 @@ def _(
     simw,
     weighted_best,
 ):
-    _paths = cufed_emb["path"]
+    _paths = album_emb["path"]
     _musiq_paths = dict(zip(musiq_best["cluster"], musiq_best["path"]))
     _blocks = []
 

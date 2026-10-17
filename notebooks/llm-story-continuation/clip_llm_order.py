@@ -58,7 +58,7 @@ def _():
     from dataset_loaders import (
         load_personal_photos_images,
         load_vist_album_images,
-        load_yfcc_album_images,
+        load_yfcc_city,
     )
 
     BLIP_MODEL_NAME = "Salesforce/blip-image-captioning-base"
@@ -74,7 +74,7 @@ def _():
         load_clip,
         load_personal_photos_images,
         load_vist_album_images,
-        load_yfcc_album_images,
+        load_yfcc_city,
         pipeline,
         rank_images,
         torch,
@@ -103,7 +103,7 @@ def _(mo):
 
 
 @app.cell
-def _(Path, dataset_choice):
+def _(dataset_choice):
     max_photos = 50
     top_k = 5
 
@@ -113,14 +113,11 @@ def _(Path, dataset_choice):
     MAX_SENTENCE_WORDS = 15
 
     city = None
-    city_dir = None
     album_id = None
     json_path = None
 
     if dataset_choice.value == "yfcc_amsterdam":
         city = "Amsterdam"
-        city_dir = Path("datasets/yfcmmf00m-cities-amsterdam")
-        album_id = "98"
     elif dataset_choice.value == "vist":
         album_id = "72157608661271127"
         json_path = Path("datasets/sis/train.story-in-sequence.json")
@@ -131,7 +128,6 @@ def _(Path, dataset_choice):
         TEMPERATURE,
         album_id,
         city,
-        city_dir,
         json_path,
         max_photos,
     )
@@ -161,23 +157,24 @@ def _(mo):
 
 @app.cell
 def _(
+    Path,
     album_id,
     city,
-    city_dir,
     dataset_choice,
     json_path,
     load_personal_photos_images,
     load_vist_album_images,
-    load_yfcc_album_images,
+    load_yfcc_city,
     max_photos,
 ):
     if dataset_choice.value == "yfcc_amsterdam":
-        image_records = load_yfcc_album_images(city, album_id, city_dir)[:max_photos]
+        image_paths = [Path(p) for p in load_yfcc_city(city)["path"][:max_photos]]
     elif dataset_choice.value == "vist":
         image_records = load_vist_album_images(album_id, json_path)[:max_photos]
+        image_paths = [r.path for r in image_records]
     else:
         image_records = load_personal_photos_images()[:max_photos]
-    image_paths = [r.path for r in image_records]
+        image_paths = [r.path for r in image_records]
     return (image_paths,)
 
 

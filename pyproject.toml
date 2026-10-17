@@ -25,6 +25,7 @@ dependencies = [
     "tensorflow>=2.21.0",
     "tensorflow-hub>=0.16.1",
     "setuptools<81",
+    "h5py>=3.14.0",
 ]
 
 [project.optional-dependencies]

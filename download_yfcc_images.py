@@ -78,12 +78,6 @@ def download_all(city: str, albums: dict) -> None:
         print("Done. No failures.")
 
 
-def download_album(city: str, city_dir: Path, album_id: str) -> None:
-    csv_path = city_dir / f"{album_id}.csv"
-    rows = read_album_rows(csv_path)
-    download_all(city, {album_id: rows})
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("city_dir", type=Path)

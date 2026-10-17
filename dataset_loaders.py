@@ -48,20 +48,6 @@ def load_personal_photos_images() -> list[ImageRecord]:
     return [ImageRecord(path=p, id=p.stem) for p in paths]
 
 
-def load_yfcc_album_images(
-    city: str, album_id: str, city_dir: Path | None = None
-) -> list[ImageRecord]:
-    album_dir = YFCC_IMAGES_ROOT / city / album_id
-    records = _images_in(album_dir)
-    if records or city_dir is None:
-        return records
-
-    from download_yfcc_images import download_album
-
-    download_album(city, city_dir, album_id)
-    return _images_in(album_dir)
-
-
 CUFED_ROOT = Path("datasets/cufed")
 LIVE_ROOT = Path("datasets/live/ChallengeDB_release")
 
@@ -127,4 +113,83 @@ def load_live(root: Path = LIVE_ROOT):
             ),
             "is_training": [n.startswith("t") for n in names],
         }
+    )
+
+
+
+YFCC_CITIES_ROOT = Path("datasets")
+YFCC_CITIES = ("Amsterdam", "Istanbul", "Paris", "Tokyo", "Venice")
+
+
+def _yfcc_city_dir(city: str) -> Path:
+    return YFCC_CITIES_ROOT / f"yfcmm100m-cities-{city.lower()}"
+
+
+def _yfcc_city_row(city: str, photo: dict) -> dict:
+    image_id = Path(photo["name"]).stem
+    return {
+        "event_id": city,
+        "image_id": image_id,
+        "path": str(YFCC_IMAGES_ROOT / city / city / f"{image_id}.jpg"),
+        "flickr_url": photo["url"],
+        "datetaken": photo["datetaken"],
+        "title": photo["title"],
+        "tags": photo["tags"],
+        "description": photo["desc"]["_content"],
+        "latitude": float(photo["latitude"]),
+        "longitude": float(photo["longitude"]),
+    }
+
+
+def _download_missing_city(city: str, rows: list[dict]) -> None:
+    missing = [
+        {"id": r["image_id"], "url_s": r["flickr_url"]}
+        for r in rows
+        if not Path(r["path"]).exists()
+    ]
+    if not missing:
+        return
+
+    from download_yfcc_images import download_all
+
+    download_all(city, {city: missing})
+
+
+def _mat_string(file, ref) -> str:
+    return "".join(map(chr, file[ref][()].ravel()))
+
+
+def load_yfcc_human_summaries(city: str) -> list[list[str]]:
+    import h5py
+
+    mat_path = _yfcc_city_dir(city) / f"{city}_humansummary.mat"
+    with h5py.File(mat_path, "r") as f:
+        return [
+            [Path(_mat_string(f, name_ref)).stem for name_ref in f[summary_ref][()].ravel()]
+            for summary_ref in f["humansummary"][()].ravel()
+        ]
+
+
+def _add_human_picks(row: dict, summaries: list[list[str]]) -> dict:
+    ranks = [
+        summary.index(row["image_id"]) + 1 if row["image_id"] in summary else None
+        for summary in summaries
+    ]
+    return row | {
+        "human_ranks": ranks,
+        "human_votes": sum(r is not None for r in ranks),
+    }
+
+
+def load_yfcc_city(city: str, download: bool = True):
+    import polars as pl
+
+    json_path = _yfcc_city_dir(city) / f"{city}.json"
+    photos = json.loads(json_path.read_text(encoding="utf-8"))
+    summaries = load_yfcc_human_summaries(city)
+    rows = [_add_human_picks(_yfcc_city_row(city, p), summaries) for p in photos]
+    if download:
+        _download_missing_city(city, rows)
+    return pl.DataFrame(rows).filter(
+        pl.col("path").map_elements(lambda p: Path(p).exists(), return_dtype=pl.Boolean)
     )
