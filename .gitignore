@@ -13,3 +13,6 @@ sis
 __marimo__
 datasets
 .env
+
+#model cache 
+.cache
