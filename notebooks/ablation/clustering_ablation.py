@@ -171,7 +171,7 @@ def _(a_labels, city_emb, g_labels, kmeans_labels, np):
         rect=[0, 0.05, 1, 1]
     )  # leave room at the bottom for the caption
     plt.show()
-    return X2, plt
+    return PCA, X, X2, plt
 
 
 @app.cell(hide_code=True)
@@ -340,7 +340,7 @@ def _(
         {"kmeans": kmeans_labels, "agglomerative": a_labels, "gmm": g_labels },
     )
     clustering_scores.group_by("method").agg(pl.col("clusters_hitrate").mean()) # aggreagate the score from a list of humans
-    return (clustering_scores,)
+    return clustering_scores, score_methods
 
 
 @app.cell(hide_code=True)
@@ -369,7 +369,7 @@ def _(
         ])
 
     all_scores = pl.concat([ clustering_scores, random_scores(human_collections, dummy_labels, method_name="shuffled") ])
-    return (all_scores,)
+    return all_scores, random_scores
 
 
 @app.cell
@@ -379,9 +379,24 @@ def _(all_scores, pl):
 
 
 @app.cell
-def _(a_labels, g_labels, kmeans_labels, mo):
+def _(
+    a_labels,
+    g_labels,
+    gmm_pca_labels,
+    kmeans_labels,
+    kmeans_meta_labels,
+    mo,
+    time_labels,
+):
     method_picker = mo.ui.dropdown(
-        options={"kmeans": kmeans_labels, "agglomerative": a_labels, "gmm": g_labels},
+        options={
+            "kmeans": kmeans_labels,
+            "agglomerative": a_labels,
+            "gmm": g_labels,
+            "gmm_pca": gmm_pca_labels,
+            "kmeans_meta": kmeans_meta_labels,
+            "time_only": time_labels,
+        },
         value="kmeans",
         label="method",
     )
@@ -403,7 +418,6 @@ def _(city_emb, method_picker, pl):
         .with_columns((pl.col("votes") / pl.col("size")).alias("votes_per_image"))
         .sort("votes_per_image", descending=True)
     )
-
     return
 
 
@@ -411,6 +425,22 @@ def _(city_emb, method_picker, pl):
 def _(mo):
     mo.md(r"""
     # Humans pick mostly from the same clusters - not from different ones....
+
+    These results are for Amsterdam, DINOv2 small, k-means with `random_state = 0`.
+
+    The k-means clusters spread the human picks less than random clusters.
+
+    - Clusters 8 and 3 have 29% of the images, but they get 65% of the votes (130 of 200).
+    - Clusters 5 and 6 have 18 images. They get no votes.
+    - The mean is 2 votes for each image (200 votes, 100 images).
+
+    DINOv2 puts the images that look the same into one cluster.
+    The humans pick many images from the clusters with the iconic images, and no images from other clusters.
+
+
+
+    Thus, the rule "pick one image from each cluster" does not agree with the humans for this album...................
+    .
     """)
     return
 
@@ -428,22 +458,30 @@ def _(method_picker, mo):
 
 @app.cell
 def _(mo, np, pl):
-
     def cluster_gallery(df: pl.DataFrame, labels: np.ndarray, cluster: int):
         members = (
             df.with_columns(cluster=pl.Series(labels))
             .filter(pl.col("cluster") == cluster)
             .sort("human_votes", descending=True)
         )
-        tiles = [
-            mo.vstack([mo.image(src=r["path"], width=160, height=160), mo.md(f"votes: **{r['human_votes']}**")], align="center")
-            for r in members.iter_rows(named=True)
+
+        def tile(r):
+            return mo.vstack(
+                [mo.image(src=r["path"], width=160, height=160),
+                 mo.md(f"votes: **{r['human_votes']}**")],
+                align="center",
+            )
+
+        half = (len(members) + 1) // 2
+        rows = [
+            mo.hstack([tile(r) for r in part.iter_rows(named=True)], gap=1, justify="start")
+            for part in (members.head(half), members.slice(half))
         ]
+
         return mo.vstack([
             mo.md(f"### Cluster {cluster}: {len(members)} images, {members['human_votes'].sum()} votes"),
-            mo.hstack(tiles, wrap=True, gap=1),
+            *rows,
         ])
-
 
     return (cluster_gallery,)
 
@@ -451,6 +489,211 @@ def _(mo, np, pl):
 @app.cell
 def _(city_emb, cluster_gallery, cluster_picker, method_picker):
     cluster_gallery(city_emb, method_picker.value, int(cluster_picker.value))
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Add photo metadata to the features
+    Each photo has a time (`datetaken`) and a GPS position (`latitude`, `longitude`).
+    If the humans pick images from all parts of the trip, time clusters can agree better with the humans.
+
+    We add the scaled metadata to the embedding. A weight sets the effect of the metadata.
+    """)
+    return
+
+
+@app.cell
+def _(np, pl):
+    from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
+
+    SCALERS = {"standard": StandardScaler}
+
+
+    def raw_metadata(df: pl.DataFrame) -> np.ndarray:
+        return df.select(
+            pl.col("datetaken").str.to_datetime().dt.epoch("s").cast(pl.Float64),
+            "latitude",
+            "longitude",
+        ).to_numpy()
+
+
+    def metadata_features(df: pl.DataFrame, scaler: str, clip: float | None) -> np.ndarray:
+        meta = SCALERS[scaler]().fit_transform(raw_metadata(df))
+        return meta if clip is None else np.clip(meta, -clip, clip)
+
+    return metadata_features, raw_metadata
+
+
+@app.cell
+def _(np, score_all_humans):
+    def corrected_hitrate(humans, labels: np.ndarray, n_runs: int = 200) -> float:
+        rng = np.random.default_rng(0)
+        real = score_all_humans(humans, labels)["clusters_hitrate"].mean()
+        null = np.mean([
+            score_all_humans(humans, rng.permutation(labels))["clusters_hitrate"].mean()
+            for _ in range(n_runs)
+        ])
+        return real - null
+
+    return (corrected_hitrate,)
+
+
+@app.cell
+def _(K, KMeans, X, city_emb, metadata_features, np, random_state):
+    def meta_kmeans_labels(scaler: str, clip: float | None, weight: float) -> np.ndarray:
+        meta = metadata_features(city_emb, scaler, clip)
+        return KMeans(n_clusters=K, random_state=random_state).fit_predict(
+            np.hstack([X, weight * meta])
+        )
+
+    return (meta_kmeans_labels,)
+
+
+@app.cell
+def _(corrected_hitrate, human_collections, meta_kmeans_labels, pl):
+    from sklearn.model_selection import ParameterGrid
+
+    _grid = ParameterGrid({
+        "scaler": ["standard", "robust", "minmax"],
+        "clip": [None, 3.0],
+        "weight": [0.0, 0.25, 0.5, 1.0, 2.0],
+    })
+    _tune, _holdout = human_collections[::2], human_collections[1::2]
+
+
+    def grid_row(params: dict) -> dict:
+        labels = meta_kmeans_labels(**params)
+        return params | {
+            "tune": corrected_hitrate(_tune, labels),
+            "holdout": corrected_hitrate(_holdout, labels),
+        }
+
+
+    meta_grid = pl.DataFrame([grid_row(p) for p in _grid]).sort("tune", descending=True)
+    meta_grid
+    return (meta_grid,)
+
+
+@app.cell
+def _(
+    K,
+    KMeans,
+    city_emb,
+    meta_grid,
+    meta_kmeans_labels,
+    random_state,
+    raw_metadata,
+):
+    best_meta_params = meta_grid.select("scaler", "clip", "weight").row(0, named=True)
+    kmeans_meta_labels = meta_kmeans_labels(**best_meta_params)
+    time_labels = KMeans(n_clusters=K, random_state=random_state).fit_predict(
+        raw_metadata(city_emb)[:, :1]
+    )
+    best_meta_params
+    return kmeans_meta_labels, time_labels
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Fix GMM with PCA
+    GMM gives the same clusters as k-means. There are two causes:
+
+    1. The embedding has 384 dimensions, and the album has 100 images.
+       A full covariance matrix has about 74,000 parameters for each cluster.
+       GMM cannot calculate these parameters from 100 images.
+       The regularization (`reg_covar`) controls the result, and GMM operates as spherical k-means.
+    2. GMM starts from the k-means result (`init_params="kmeans"`). Then it does not move.
+
+    The fix:
+
+    - We use PCA to decrease the number of dimensions to 10.
+      With a full covariance, each cluster then has about 55 parameters.
+    - We start each Gaussian at a random image (`init_params="random_from_data"`).
+    - We keep the best result of 10 starts (`n_init=10`).
+
+    The adjusted Rand index (ARI) compares two clusterings. An ARI of 1 shows the same clusters.
+    Do not compare the label arrays directly. The cluster numbers are arbitrary.
+    """)
+    return
+
+
+@app.cell
+def _(GaussianMixture, K, PCA, X, g_labels, kmeans_labels, random_state):
+    from sklearn.metrics import adjusted_rand_score
+    from sklearn.pipeline import make_pipeline
+
+
+    def pca_gmm(n_dims: int, covariance: str = "full"):
+        return make_pipeline(
+            PCA(n_components=n_dims, random_state=random_state),
+            GaussianMixture(
+                n_components=K,
+                covariance_type=covariance,
+                init_params="random_from_data",
+                n_init=10,
+                random_state=random_state,
+            ),
+        )
+
+
+    gmm_pca_labels = pca_gmm(n_dims=10).fit_predict(X)
+    {
+        "ARI gmm vs kmeans": adjusted_rand_score(kmeans_labels, g_labels),
+        "ARI gmm_pca vs kmeans": adjusted_rand_score(kmeans_labels, gmm_pca_labels),
+    }
+    return (gmm_pca_labels,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Compare the new clusterings with the humans
+    Each method gets its own shuffled baseline.
+    The shuffled baseline keeps the cluster sizes of its method.
+    If a method is not better than its own shuffled baseline, its clusters do not agree with the humans.
+    """)
+    return
+
+
+@app.cell
+def _(
+    gmm_pca_labels,
+    human_collections,
+    kmeans_labels,
+    kmeans_meta_labels,
+    np,
+    pl,
+    random_scores,
+    score_methods,
+    time_labels,
+):
+    _methods = {
+        "kmeans": kmeans_labels,
+        "gmm_pca": gmm_pca_labels,
+        "kmeans_meta": kmeans_meta_labels,
+        "time_only": time_labels,
+    }
+    _rng = np.random.default_rng(0)
+    _shuffled = [
+        random_scores(
+            human_collections,
+            [_rng.permutation(labels) for _ in range(1000)],
+            method_name=f"shuffled_{name}",
+        )
+        for name, labels in _methods.items()
+    ]
+    (
+        pl.concat([score_methods(human_collections, _methods), *_shuffled])
+        .group_by("method")
+        .agg(
+            pl.col("clusters_hitrate").mean().alias("mean"),
+            pl.col("clusters_hitrate").std().alias("std"),
+        )
+        .sort("method")
+    )
     return
 
 
