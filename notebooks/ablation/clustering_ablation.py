@@ -27,7 +27,8 @@ def _(mo):
 @app.cell
 def _(load_yfcc_city):
     city = load_yfcc_city("Amsterdam")
-    return (city,)
+    random_state = 42
+    return city, random_state
 
 
 @app.cell
@@ -91,11 +92,12 @@ def _(mo):
     For each human, the **hit rate** is the number of different clusters that the 10 picks fall in, divided by 10.
     A hit rate of 1 shows that the human picked one image from each cluster.
 
-    Large clusters get more picks by chance.
-    Thus, the **shuffled** baseline gives the images to random clusters, but it keeps the cluster sizes of the method.
-    We calculate the mean of 1000 shuffles.
+    Large clusters get more picks by chance. Thus, we compare the methods with two baselines:
 
-    **adjusted** is the hit rate minus the shuffled hit rate. A value of 0 is the same as chance.
+    - **shuffled kmeans**: the k-means labels in a random order. The cluster sizes are the same as k-means.
+    - **random**: each image goes to a random cluster.
+
+    If a method does not get a higher hit rate than the baselines, its clusters do not agree with the humans.
     """)
     return
 
@@ -106,20 +108,15 @@ def _(human_picks, np, pl):
         return float(np.mean([len(np.unique(labels[p])) / len(p) for p in human_picks]))
 
 
-    def shuffled_hitrate(labels: np.ndarray, n_runs: int = 1000) -> float:
-        rng = np.random.default_rng(0)
-        return float(np.mean([mean_hitrate(rng.permutation(labels)) for _ in range(n_runs)]))
-
-
     def scores(labels: np.ndarray) -> dict:
-        real, shuffled = mean_hitrate(labels), shuffled_hitrate(labels)
-        return {"hitrate": real, "shuffled": shuffled, "corrected": real - shuffled}
+        real = mean_hitrate(labels)
+        return {"hitrate": real}
 
 
     def score_table(labels: dict[str, np.ndarray]) -> pl.DataFrame:
         return pl.DataFrame([{"method": name} | scores(l) for name, l in labels.items()])
 
-    return (score_table,)
+    return mean_hitrate, score_table
 
 
 @app.cell(hide_code=True)
@@ -180,16 +177,17 @@ def _(
     embeddings,
     make_pipeline,
     metadata,
+    random_state,
     score_table,
 ):
     _features = ColumnTransformer([
-        ("visual", make_pipeline(Normalizer(), PCA(n_components=10, random_state=0), StandardScaler()), embeddings),
+        ("visual", make_pipeline(Normalizer(), PCA(n_components=10, random_state=random_state), StandardScaler()), embeddings),
         ("meta", StandardScaler(), metadata),
     ])
     meta_pca_labels = {
-        "meta+pca | kmeans": make_pipeline(_features, KMeans(n_clusters=K, random_state=0)).fit_predict(X),
+        "meta+pca | kmeans": make_pipeline(_features, KMeans(n_clusters=K, random_state=random_state)).fit_predict(X),
         "meta+pca | agglomerative": make_pipeline(_features, AgglomerativeClustering(n_clusters=K)).fit_predict(X),
-        "meta+pca | gmm": make_pipeline(_features, GaussianMixture(n_components=K, random_state=0)).fit_predict(X),
+        "meta+pca | gmm": make_pipeline(_features, GaussianMixture(n_components=K, random_state=random_state)).fit_predict(X),
     }
     meta_pca_table = score_table(meta_pca_labels)
     meta_pca_table
@@ -216,15 +214,37 @@ def _(
     X,
     embeddings,
     make_pipeline,
+    mean_hitrate,
+    np,
+    pl,
+    random_state,
     score_table,
 ):
+    from sklearn.base import clone
+
     _features = ColumnTransformer([("visual", Normalizer(), embeddings)])
+
+    def _labels(model):
+        return make_pipeline(clone(_features), model).fit_predict(X)
+
     visual_labels = {
-        "visual | kmeans": make_pipeline(_features, KMeans(n_clusters=K, random_state=0)).fit_predict(X),
-        "visual | agglomerative": make_pipeline(_features, AgglomerativeClustering(n_clusters=K)).fit_predict(X),
-        "visual | gmm": make_pipeline(_features, GaussianMixture(n_components=K, random_state=0)).fit_predict(X),
+        "visual kmeans": _labels(KMeans(n_clusters=K, random_state=random_state)),
+        "visual agglomerative": _labels(AgglomerativeClustering(n_clusters=K)),
+        "visual gmm": _labels(GaussianMixture(n_components=K, random_state=random_state)),
     }
-    visual_table = score_table(visual_labels)
+
+    def baseline_row(name: str, draw, n_runs: int = 1000) -> dict:
+        rng = np.random.default_rng(random_state)
+        hitrates = np.array([mean_hitrate(draw(rng)) for _ in range(n_runs)])
+        return {"method": name, "hitrate": hitrates.mean()}
+
+
+    baselines = pl.DataFrame([
+        baseline_row("shuffled kmeans", lambda rng: rng.permutation(visual_labels["visual kmeans"])),
+        baseline_row("random", lambda rng: rng.integers(0, K, size=len(X))),
+    ])
+
+    visual_table =  pl.concat([score_table(visual_labels), baselines], how="diagonal")
     visual_table
     return visual_labels, visual_table
 
@@ -233,15 +253,19 @@ def _(
 def _(mo):
     mo.md(r"""
     # Results
-    All the methods, sorted by the corrected hit rate.
-    A negative value shows that the clusters spread the human picks less than random clusters.
+    All the methods and the baselines, sorted by the hit rate.
     """)
     return
 
 
 @app.cell
+def _():
+    return
+
+
+@app.cell
 def _(meta_pca_table, pl, visual_table):
-    pl.concat([meta_pca_table, visual_table]).sort("corrected", descending=True)
+    pl.concat([meta_pca_table, visual_table]).sort("hitrate", descending=True)
     return
 
 
@@ -257,7 +281,7 @@ def _(mo):
 @app.cell
 def _(meta_pca_labels, mo, visual_labels):
     method_picker = mo.ui.dropdown(
-        options=visual_labels | meta_pca_labels, value="visual | kmeans", label="method"
+        options=visual_labels | meta_pca_labels, value="visual kmeans", label="method"
     )
     method_picker
     return (method_picker,)
