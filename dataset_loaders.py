@@ -116,7 +116,6 @@ def load_live(root: Path = LIVE_ROOT):
     )
 
 
-
 YFCC_CITIES_ROOT = Path("datasets")
 YFCC_CITIES = ("Amsterdam", "Istanbul", "Paris", "Tokyo", "Venice")
 
@@ -130,7 +129,7 @@ def _yfcc_city_row(city: str, photo: dict) -> dict:
     return {
         "event_id": city,
         "image_id": image_id,
-        "path": str(YFCC_IMAGES_ROOT / city / city / f"{image_id}.jpg"),
+        "path": "./" + str(YFCC_IMAGES_ROOT / city / city / f"{image_id}.jpg"),
         "flickr_url": photo["url"],
         "datetaken": photo["datetaken"],
         "title": photo["title"],
@@ -165,7 +164,10 @@ def load_yfcc_human_summaries(city: str) -> list[list[str]]:
     mat_path = _yfcc_city_dir(city) / f"{city}_humansummary.mat"
     with h5py.File(mat_path, "r") as f:
         return [
-            [Path(_mat_string(f, name_ref)).stem for name_ref in f[summary_ref][()].ravel()]
+            [
+                Path(_mat_string(f, name_ref)).stem
+                for name_ref in f[summary_ref][()].ravel()
+            ]
             for summary_ref in f["humansummary"][()].ravel()
         ]
 

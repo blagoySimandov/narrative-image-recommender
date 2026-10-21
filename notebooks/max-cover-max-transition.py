@@ -51,7 +51,7 @@ def _(load_cufed, load_yfcc_city, mo):
     dataset_loaders = {"CUFED": load_cufed} | {
         f"YFCC100M {city}": partial(load_yfcc_city, city) for city in YFCC_CITIES
     }
-    dataset_radio = mo.ui.radio(options=dataset_loaders, value="CUFED", label="choose a dataset")
+    dataset_radio = mo.ui.radio(options=dataset_loaders, value="YFCC100M Amsterdam", label="choose a dataset")
     dataset_radio
     return (dataset_radio,)
 
@@ -77,7 +77,11 @@ def _(dataset_full):
 
 @app.cell
 def selection(dataset_full, mo, pl):
-    selected_album = mo.ui.table(dataset_full.group_by("event_id").agg(pl.col("flickr_url").max()), selection="single")
+    selected_album = mo.ui.table(
+        dataset_full.group_by("event_id").agg(pl.col("flickr_url").max()),
+        selection="single",
+        initial_selection=[0],
+    )
     selected_album
     return (selected_album,)
 
@@ -189,7 +193,7 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    k = mo.ui.slider(label="k", start=1, stop=10, step=1, value=5)
+    k = mo.ui.slider(label="k", start=1, stop=20, step=1, value=10)
     k
     return (k,)
 
@@ -553,9 +557,140 @@ def _(img_df_scores_scaled):
     return
 
 
-@app.cell
-def _():
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Evaluate the selections against the human summaries
+    Only the YFCC100M datasets have human summaries.
+    In each city, 20 or more persons picked 10 images from the album.
+
+    We compare three methods. Each method picks one image from each cluster:
+
+    - **centroid**: the image that is nearest to the cluster centroid.
+    - **musiq**: the image with the highest MUSIQ score.
+    - **weighted**: the image with the highest weighted score. The slider above sets the weight.
+
+    We calculate these metrics for each method:
+
+    - **precision**, **recall**, **F1**: the overlap with each human summary. We give the mean over all the humans.
+    - **best F1**: the F1 for the human that agrees most with the method.
+    - **vote score**: the sum of the human votes for the picked images, divided by the highest possible sum for the same number of images.
+
+    We also calculate two baselines:
+
+    - **random**: random images. We give the mean of 1000 runs. This is the lower limit.
+    - **human**: each human against all the other humans. This is the upper limit.
+
+    Set k to 10 for a fair comparison. Each human summary has 10 images.
+    """)
     return
+
+
+@app.cell
+def _(album_emb, mo):
+    mo.stop(
+        "human_ranks" not in album_emb.columns,
+        mo.md("**This dataset has no human summaries. Select a YFCC100M dataset.**"),
+    )
+    return
+
+
+@app.cell
+def _(np, pl):
+    def human_pick_sets(df: pl.DataFrame) -> list[set[int]]:
+        ranks = df["human_ranks"].to_list()
+        return [
+            {row for row, r in enumerate(ranks) if r[h] is not None}
+            for h in range(len(ranks[0]))
+        ]
+
+
+    def overlap_scores(picks: set[int], human: set[int]) -> dict:
+        hits = len(picks & human)
+        precision = hits / len(picks)
+        recall = hits / len(human)
+        f1 = 0.0 if hits == 0 else 2 * precision * recall / (precision + recall)
+        return {"precision": precision, "recall": recall, "f1": f1}
+
+
+    def vote_score(votes: np.ndarray, picks: set[int]) -> float:
+        best = np.sort(votes)[::-1][: len(picks)].sum()
+        return votes[list(picks)].sum() / best
+
+
+    def evaluate_picks(picks: set[int], humans: list[set[int]], votes: np.ndarray) -> dict:
+        per_human = pl.DataFrame([overlap_scores(picks, h) for h in humans])
+        return {
+            "precision": per_human["precision"].mean(),
+            "recall": per_human["recall"].mean(),
+            "f1": per_human["f1"].mean(),
+            "best_f1": per_human["f1"].max(),
+            "vote_score": vote_score(votes, picks),
+        }
+
+    return evaluate_picks, human_pick_sets, overlap_scores
+
+
+@app.cell
+def _(album_emb, iconic_indexes, musiq_best, weighted_best):
+    _row_of = {p: i for i, p in enumerate(album_emb["path"])}
+    method_picks = {
+        "centroid": {int(i) for i in iconic_indexes},
+        "musiq": {_row_of[p] for p in musiq_best["path"]},
+        "weighted": {_row_of[p] for p in weighted_best["path"]},
+    }
+    return (method_picks,)
+
+
+@app.cell
+def _(evaluate_picks, np, overlap_scores, pl):
+    def random_baseline(n_images: int, k: int, humans, votes, n_runs: int = 1000) -> dict:
+        rng = np.random.default_rng(0)
+        runs = [
+            evaluate_picks(set(rng.choice(n_images, size=k, replace=False).tolist()), humans, votes)
+            for _ in range(n_runs)
+        ]
+        return pl.DataFrame(runs).mean().to_dicts()[0]
+
+
+    def human_baseline(humans: list[set[int]], votes) -> dict:
+        f1 = [
+            overlap_scores(humans[i], humans[j])["f1"]
+            for i in range(len(humans))
+            for j in range(len(humans))
+            if i != j
+        ]
+        votes_each = [
+            evaluate_picks(h, humans, votes - np.isin(np.arange(len(votes)), list(h)))["vote_score"]
+            for h in humans
+        ]
+        return {"f1": float(np.mean(f1)), "vote_score": float(np.mean(votes_each))}
+
+    return human_baseline, random_baseline
+
+
+@app.cell
+def _(
+    album_emb,
+    evaluate_picks,
+    human_baseline,
+    human_pick_sets,
+    k,
+    method_picks,
+    pl,
+    random_baseline,
+):
+    _humans = human_pick_sets(album_emb)
+    _votes = album_emb["human_votes"].to_numpy()
+    _rows = [
+        {"method": name} | evaluate_picks(picks, _humans, _votes)
+        for name, picks in method_picks.items()
+    ]
+    _rows.append({"method": "random"} | random_baseline(len(album_emb), k.value, _humans, _votes))
+    _rows.append({"method": "human"} | human_baseline(_humans, _votes))
+    evaluation = pl.DataFrame(_rows, strict=False)
+    evaluation
+    return (evaluation,)
 
 
 if __name__ == "__main__":
