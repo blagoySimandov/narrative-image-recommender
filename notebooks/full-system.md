@@ -237,6 +237,7 @@ df_ranked = add_selection_score(df_scored, w1.value, w2.value)
 ```
 
 ```python {.marimo}
+#one image per cluster (uniform distribution)
 one_quotas = df_ranked.select(pl.col("cluster").unique(), quota=pl.lit(1, dtype=pl.Int64))
 picked_coverage = top_per_cluster(df_ranked, one_quotas)
 picked_coverage
@@ -258,6 +259,42 @@ picked_proportional
 ```
 
 ## Visualize the selected images against the images simliar images
+
+```python {.marimo}
+strategy = mo.ui.dropdown(
+    options={"coverage": picked_coverage, "proportional": picked_proportional},
+    value="coverage",
+    label="selection strategy",
+)
+max_members = mo.ui.slider(label="members to show", start=5, stop=50, step=5, value=20)
+mo.hstack([strategy, max_members])
+```
+
+```python {.marimo}
+def _thumbs(paths: list[str], size: int):
+    return mo.hstack([mo.image(src=p, width=size, height=size) for p in paths], wrap=True, gap=0.5)
+
+def cluster_view(cluster_id, picked: pl.DataFrame, n_members: int):
+    members = (
+        df_ranked.filter(pl.col("cluster") == cluster_id)
+        .join(picked.select("path"), on="path", how="anti")
+        .sort("medoid_sim", descending=True)
+        .head(n_members)
+    )
+    size = df_ranked.filter(pl.col("cluster") == cluster_id).height
+    return mo.vstack([
+        mo.md(f"### Cluster {cluster_id} ({size} images, {picked.height} picked)"),
+        mo.hstack([_thumbs(picked["path"].to_list(), 180), _thumbs(members["path"].to_list(), 90)],
+                  gap=2, align="start", widths=[1, 3]),
+        mo.md("---"),
+    ])
+
+_picked = strategy.value
+mo.vstack([
+    cluster_view(c, _picked.filter(pl.col("cluster") == c), max_members.value)
+    for c in _picked["cluster"].unique().sort()
+])
+```
 
 ## Order images
 
