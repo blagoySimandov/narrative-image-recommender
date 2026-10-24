@@ -306,9 +306,9 @@ def _(mo):
 
 @app.cell
 def _(
+    album_emb,
     cluster_block,
     cluster_members,
-    album_emb,
     iconic_indexes,
     image_column,
     mo,
@@ -409,9 +409,9 @@ def _(mo):
 
 @app.cell
 def _(
+    album_emb,
     cluster_block,
     cluster_members,
-    album_emb,
     iconic_indexes,
     image_column,
     mo,
@@ -467,7 +467,6 @@ def _(img_df_scores, pl):
         pl.Series("musiq_score_scaled", scaled[:, 1])
     )
     img_df_scores_scaled.select("centroid_similarity_scaled","musiq_score_scaled")
-
     return (img_df_scores_scaled,)
 
 
@@ -510,9 +509,9 @@ def _(mo):
 
 @app.cell
 def _(
+    album_emb,
     cluster_block,
     cluster_members,
-    album_emb,
     iconic_indexes,
     image_column,
     mo,
@@ -690,7 +689,7 @@ def _(
     _rows.append({"method": "human"} | human_baseline(_humans, _votes))
     evaluation = pl.DataFrame(_rows, strict=False)
     evaluation
-    return (evaluation,)
+    return
 
 
 if __name__ == "__main__":

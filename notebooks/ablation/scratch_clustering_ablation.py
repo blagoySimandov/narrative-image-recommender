@@ -201,7 +201,7 @@ def _(X2, a_labels, np, paths, plt):
     _fig, _ax = plt.subplots(figsize=(14, 10), dpi=200)
     for (x, y), p, c in zip(X2, paths, a_labels):
         im = Image.open(p).convert("RGB")
-        im.thumbnail((160, 160))
+        im.thumbnail((200, 200))
         ab = AnnotationBbox(
             OffsetImage(np.asarray(im), zoom=0.15),
             (x, y),
@@ -290,6 +290,12 @@ def _(kmeans_labels, np):
         rng.permutation(kmeans_labels) for _ in range(1000)
     ]  # "dummy" clusterer is our baseline.  shuffled kmeans - keep the cluster sizes the same for the sake of the xperiment
     return (dummy_labels,)
+
+
+@app.cell
+def _(kmeans_labels):
+    kmeans_labels
+    return
 
 
 @app.cell
@@ -403,7 +409,6 @@ def _(city_emb, method_picker, pl):
         .with_columns((pl.col("votes") / pl.col("size")).alias("votes_per_image"))
         .sort("votes_per_image", descending=True)
     )
-
     return
 
 
