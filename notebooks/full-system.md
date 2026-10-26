@@ -160,7 +160,7 @@ skpipes = Pipeline(
 ```
 
 ```python {.marimo}
-df_clean = df_embedded.filter(
+df_clean = df_embedded.with_row_index("orig_idx").filter(
     pl.col("datetaken").str.to_datetime(strict=False).is_not_null()
 )
 labels = skpipes.fit_predict(df_clean)
@@ -301,6 +301,28 @@ mo.vstack([
 For the sake of simplicity we can order the iamges using their datetaken column. We will only use chronological ordering
 for now and try other more innovatinve techniques later.
 
+```python {.marimo}
+def order_chronologically(picked: pl.DataFrame) -> pl.DataFrame:
+    taken = pl.col("datetaken").str.to_datetime(strict=False)
+
+    return (
+        picked.with_columns(taken.alias("taken_at"))
+        .sort("taken_at")
+        .with_row_index("story_pos")
+    )
+
+story = order_chronologically(strategy.value)
+story.select("story_pos", "orig_idx", "taken_at", "cluster", "score", "path")
+```
+
+```python {.marimo}
+def story_card(step: int, row: dict):
+    caption = f"**{step}.** {row['taken_at']:%Y-%m-%d %H:%M} · cluster {row['cluster']}"
+    return mo.vstack([mo.image(src=row["path"], width=200, height=200), mo.md(caption)], align="center")
+
+mo.hstack( [story_card(i, row) for i, row in enumerate(story.iter_rows(named=True), start=1)], wrap=True, gap=1, justify="start",)
+```
+
 ## Evaluate against human ground truth using the human_ranks and human_votes columns
 
 Human votes can be used to evaluate whether people trule pick only one image from each cluster.
@@ -308,11 +330,20 @@ This can be done via a simple "covered clusters" metric for each human ranking.
 So if there are 10 covered clusters from 10 picked images for a certain algorithm such as k means than the accuracy would be 100%
 And if there are only 2 covered clusters from 10 picked images than the accuracy would be 20%
 
+A metric for order eval can be used such kendall tau .
+
+```python {.marimo}
+from scipy.stats import kendalltau
+humanranks = df_embedded["human_ranks"].to_numpy()
+humanranks
+```
+
 ## Evaluating the order of the selected images.
 
-TODO
+TODO!!!
+We need two evals
 
+```python {.marimo}
+from scipy.stats import kendalltau
 ```
 
-
-```
