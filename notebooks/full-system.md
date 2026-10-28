@@ -9,7 +9,7 @@ import marimo as mo
 import numpy as np
 import polars as pl
 
-from dataset_loaders import load_yfcc_city
+from dataset_loaders import load_yfcc_city, load_yfcc_human_summaries
 ```
 
 # Load dataset
@@ -19,7 +19,7 @@ city = load_yfcc_city("amsterdam")
 city
 ```
 
-# Pipelinee
+# Pipeline
 
 ```python {.marimo}
 from transformers import pipeline
@@ -84,10 +84,10 @@ preprocess = make_column_transformer(
 preprocess.fit_transform(df_embedded)
 ```
 
-# Custom KMeans Class uing pyclustering Kmeans
+# Custom KMeans Class using kmedoids
 
-We need to use pyclustering's kmeans since it's the only one that supports custom distance metrics definitions
-The other option is the kmedoid library but it supports only the "kmedoids" algorithms.
+Kmedoids support custom distance function so we are using it.
+It also makes a bit more sense for our case since it gives us the closest image to the centroid for "free".
 
 ```python {.marimo}
 import kmedoids
@@ -124,10 +124,10 @@ class PyKMedoids(ClusterMixin, BaseEstimator):
         ).argmin(axis=1)
 ```
 
+## Creating the custom KMedoids distance
+
 ```python {.marimo}
 from sklearn.metrics.pairwise import cosine_distances, haversine_distances
-from sklearn.pipeline import Pipeline
-
 K = 10
 
 def _scaled(D):
@@ -143,6 +143,10 @@ def combined_distance(X, weights=(1.0, 1.0, 1.0)):
         cosine_distances(emb),
     ]
     return sum(w * _scaled(D) for w, D in zip(weights, parts))
+```
+
+```python {.marimo}
+from sklearn.pipeline import Pipeline
 
 skpipes = Pipeline(
     [
@@ -211,6 +215,8 @@ df_scored = df_clustered.with_columns(
     pl.Series("medoid_sim", medoid_similarity(skpipes["clustering"], labels)),
 )
 ```
+
+## Setting the Weights for Medoid Similarity and Aesthetic Score
 
 ```python {.marimo}
 w1 = mo.ui.slider(label="w1 (medoid similarity)", start=0.0, stop=1.0, step=0.05, value=0.5)
@@ -325,25 +331,358 @@ mo.hstack( [story_card(i, row) for i, row in enumerate(story.iter_rows(named=Tru
 
 ## Evaluate against human ground truth using the human_ranks and human_votes columns
 
-Human votes can be used to evaluate whether people trule pick only one image from each cluster.
+Human votes can be used to evaluate whether people truely pick only one image from each cluster.
 This can be done via a simple "covered clusters" metric for each human ranking.
 So if there are 10 covered clusters from 10 picked images for a certain algorithm such as k means than the accuracy would be 100%
 And if there are only 2 covered clusters from 10 picked images than the accuracy would be 20%
 
-A metric for order eval can be used such kendall tau .
+A metric for order eval can be used such kendall tau.
+
+The problem is that kendall tau only works when the elements from the two lists are from the same set and
+there are no "unpicked" elements from that set - that is it only considers the order without the picking part.
+
+For this evalution to make sense we need to define how we will hanlde the "unpicked" elements.
+
+A sensible definition was given by Rogier van der Geer in
+https://xebia.com/blog/using-kendalls-tau-to-compare-recommendations/
+The code below is a modifed version of the code from that blog post to work with polars.
 
 ```python {.marimo}
-from scipy.stats import kendalltau
-humanranks = df_embedded["human_ranks"].to_numpy()
-humanranks
+import scipy.stats as stats
+
+
+def extended_tau(list_a, list_b):
+    """Calculate the extended Kendall tau from two top-k lists of equal length."""
+    n = len(list_a)
+    if len(list_b) != n:
+        raise ValueError("Both lists must have the same length")
+
+    ranks = join_ranks(create_rank(list_a), create_rank(list_b)).with_columns(
+        pl.col("rank_a", "rank_b").fill_null(n)
+    )
+
+    # Pad to 2n rows with items that are absent from both lists (tied at rank n)
+    n_pad = 2 * n - ranks.height
+    dummy_df = pl.DataFrame(
+        {"rank_a": [n] * n_pad, "rank_b": [n] * n_pad},
+        schema={"rank_a": pl.Int64, "rank_b": pl.Int64},
+    )
+    total_df = pl.concat([ranks.select("rank_a", "rank_b"), dummy_df])
+
+    tau = stats.kendalltau(total_df["rank_a"].to_numpy(), total_df["rank_b"].to_numpy()).statistic
+    return scale_tau(n, tau)
+
+
+def scale_tau(length, value):
+    """Scale an extended tau correlation such that it falls in [-1, +1]."""
+    n_0 = 2 * length * (2 * length - 1)
+    n_a = length * (length - 1)
+    n_d = n_0 - n_a
+    min_tau = (2.0 * n_a - n_0) / n_d
+    return 2 * (value - min_tau) / (1 - min_tau) - 1
+
+
+def create_rank(a):
+    """Convert an ordered list to a DataFrame of (key, rank)."""
+    return pl.DataFrame(
+        {"key": a, "rank": pl.int_range(len(a), eager=True, dtype=pl.Int64)}
+    )
+
+
+def join_ranks(rank_a, rank_b):
+    """Full outer join of two rank DataFrames on key."""
+    return rank_a.rename({"rank": "rank_a"}).join(
+        rank_b.rename({"rank": "rank_b"}),
+        on="key",
+        how="full",
+        coalesce=True,
+    )
 ```
 
-## Evaluating the order of the selected images.
+## Evaluating the order of the selected images
 
-TODO!!!
-We need two evals
+We use the extended Kendall tau metric to compare the system's ordering against each human ordering, and add human–human and random baselines for context.
 
 ```python {.marimo}
-from scipy.stats import kendalltau
+import itertools
+
+def tau_table(pairs, avg_label, **cols):
+    """Per-pair tau scores plus an average row."""
+    per = pl.DataFrame({"pair": pairs, **{c: np.asarray(v, dtype=float) for c, v in cols.items()}})
+    avg = pl.DataFrame({"pair": [avg_label], **{c: [float(np.mean(v))] for c, v in cols.items()}})
+    return pl.concat([per, avg])
 ```
 
+```python {.marimo}
+humanranks = [np.asarray(r) for r in load_yfcc_human_summaries("amsterdam")]
+hn = len(humanranks)
+pred = story["image_id"].to_numpy()
+all_ids = df_clean["image_id"].to_numpy()
+```
+
+Check that every image the humans picked is in `df_clean`, so the system had a fair chance of selecting it.
+
+```python {.marimo}
+_missing = set().union(*map(set, humanranks)) - set(all_ids)
+assert not _missing, f"{len(_missing)} human-picked images missing from df_clean"
+```
+
+### System vs Human
+
+```python {.marimo}
+scores_s2h = [float(extended_tau(pred, h)) for h in humanranks]
+results_s2h = tau_table(
+    [f"system_vs_human_{i}" for i in range(hn)],
+    "system_vs_humans_avg",
+    tau=scores_s2h,
+)
+results_s2h
+```
+
+### Human vs Human
+
+Do humans agree with each other on the order?
+
+```python {.marimo}
+_pairs = list(itertools.combinations(range(hn), 2))
+scores_h2h = [float(extended_tau(humanranks[i], humanranks[j])) for i, j in _pairs]
+results_h2h = tau_table(
+    [f"human_vs_human_{i}_{j}" for i, j in _pairs],
+    "human_vs_humans_avg",
+    tau=scores_h2h,
+)
+results_h2h
+```
+
+### Random baseline vs Human
+
+Random selection picks k random images from `df_clean` in random order.
+
+```python {.marimo}
+_rng = np.random.default_rng(0)  # fixed seed for reproducibility
+n_trials = 200
+k = len(pred)
+
+rand_sel = np.empty((n_trials, hn))
+
+for _t in range(n_trials):
+    _sample = _rng.choice(all_ids, size=k, replace=False)
+    for _i, _h in enumerate(humanranks):
+        rand_sel[_t, _i] = extended_tau(_sample, _h)
+
+results_r2h = tau_table(
+    [f"random_vs_human_{i}" for i in range(hn)],
+    "random_vs_humans_avg",
+    tau=rand_sel.mean(axis=0),
+)
+results_r2h
+```
+
+### Summary
+
+```python {.marimo}
+pl.concat([
+    results_s2h.tail(1),
+    results_h2h.tail(1),
+    results_r2h.tail(1),
+])
+```
+
+## Selection overlap
+
+Overlap is the fraction of images two lists share: shared / list length, using the longer list if lengths differ. 1.0 means the same images were picked, 0.0 means none in common.
+
+```python {.marimo}
+def overlap(a, b):
+    return len(set(a) & set(b)) / max(len(a), len(b))
+```
+
+### System vs Human
+
+```python {.marimo}
+ov_s2h = tau_table(
+    [f"system_vs_human_{i}" for i in range(hn)],
+    "system_vs_humans_avg",
+    overlap=[overlap(pred, h) for h in humanranks],
+)
+ov_s2h
+```
+
+### Human vs Human
+
+```python {.marimo}
+_pairs = list(itertools.combinations(range(hn), 2))
+ov_h2h = tau_table(
+    [f"human_vs_human_{i}_{j}" for i, j in _pairs],
+    "human_vs_humans_avg",
+    overlap=[overlap(humanranks[i], humanranks[j]) for i, j in _pairs],
+)
+ov_h2h
+```
+
+### Random vs Human
+
+```python {.marimo}
+_rng = np.random.default_rng(0)
+_ov = np.empty((200, hn))
+for _t in range(200):
+    _sample = _rng.choice(all_ids, size=len(pred), replace=False)
+    _ov[_t] = [overlap(_sample, h) for h in humanranks]
+
+ov_r2h = tau_table(
+    [f"random_vs_human_{i}" for i in range(hn)],
+    "random_vs_humans_avg",
+    overlap=_ov.mean(axis=0),
+)
+ov_r2h
+```
+
+### Overlap Summary
+
+```python {.marimo}
+pl.concat([ov_s2h.tail(1), ov_h2h.tail(1), ov_r2h.tail(1)])
+```
+
+## F-Measure evaluation
+
+The F-measure compares the set of selected images with the set of reference images.
+Precision is the shared images divided by the selected images.
+Recall is the shared images divided by the reference images.
+F = 2 × shared / (selected + reference).
+If the two lists have the same length, F is equal to the overlap.
+
+```python {.marimo}
+def f_measure(pred, ref):
+    pred_set, ref_set = set(pred), set(ref)
+    return 2 * len(pred_set & ref_set) / (len(pred_set) + len(ref_set))
+```
+
+### System vs Human
+
+```python {.marimo}
+fm_s2h = tau_table(
+    [f"system_vs_human_{i}" for i in range(hn)],
+    "system_vs_humans_avg",
+    f=[f_measure(pred, h) for h in humanranks],
+)
+fm_s2h
+```
+
+### Human vs Human
+
+```python {.marimo}
+_pairs = list(itertools.combinations(range(hn), 2))
+fm_h2h = tau_table(
+    [f"human_vs_human_{i}_{j}" for i, j in _pairs],
+    "human_vs_humans_avg",
+    f=[f_measure(humanranks[i], humanranks[j]) for i, j in _pairs],
+)
+fm_h2h
+```
+
+### Random vs Human
+
+```python {.marimo}
+_rng = np.random.default_rng(0)
+_fm = np.empty((200, hn))
+for _t in range(200):
+    _sample = _rng.choice(all_ids, size=len(pred), replace=False)
+    _fm[_t] = [f_measure(_sample, h) for h in humanranks]
+
+fm_r2h = tau_table(
+    [f"random_vs_human_{i}" for i in range(hn)],
+    "random_vs_humans_avg",
+    f=_fm.mean(axis=0),
+)
+fm_r2h
+```
+
+### F-Measure Summary
+
+```python {.marimo}
+pl.concat([fm_s2h.tail(1), fm_h2h.tail(1), fm_r2h.tail(1)])
+```
+
+## Comparison: random vs system vs human
+
+Each point is one pair (random rows are already averaged over 200 trials per human).
+Random is the floor, human–human agreement is the ceiling, and the system should sit between.
+
+```python {.marimo}
+import altair as alt  # drop this line if altair is already imported in another cell
+```
+
+```python {.marimo}
+def _long(df, comparison, col, metric):
+    """Per-pair rows only (drops the *_avg row), in long format."""
+    return (
+        df.filter(~pl.col("pair").str.ends_with("_avg"))
+        .select(
+            pl.lit(comparison).alias("comparison"),
+            pl.lit(metric).alias("metric"),
+            pl.col(col).cast(pl.Float64).alias("value"),
+        )
+    )
+
+all_scores = pl.concat([
+    _long(results_r2h, "Random vs Human", "tau", "Kendall τ (order)"),
+    _long(results_s2h, "System vs Human", "tau", "Kendall τ (order)"),
+    _long(results_h2h, "Human vs Human", "tau", "Kendall τ (order)"),
+    _long(ov_r2h, "Random vs Human", "overlap", "Overlap"),
+    _long(ov_s2h, "System vs Human", "overlap", "Overlap"),
+    _long(ov_h2h, "Human vs Human", "overlap", "Overlap"),
+    _long(fm_r2h, "Random vs Human", "f", "F-measure"),
+    _long(fm_s2h, "System vs Human", "f", "F-measure"),
+    _long(fm_h2h, "Human vs Human", "f", "F-measure"),
+])
+COMPARISON_ORDER = ["Random vs Human", "System vs Human", "Human vs Human"]
+```
+
+### Summary table
+
+`normalised` = (system − random) / (human − random): 0 means no better than random,
+1 means as good as humans agree with each other.
+
+```python {.marimo}
+_means = (
+    all_scores.group_by("metric", "comparison")
+    .agg(pl.col("value").mean().alias("mean"))
+    .pivot(on="comparison", index="metric", values="mean")
+)
+comparison_summary = _means.select(
+    "metric",
+    pl.col("Random vs Human").alias("random"),
+    pl.col("System vs Human").alias("system"),
+    pl.col("Human vs Human").alias("human"),
+).with_columns(
+    ((pl.col("system") - pl.col("random")) / (pl.col("human") - pl.col("random")))
+    .alias("normalised")
+)
+comparison_summary
+```
+
+### Chart - ai generated chart
+
+```python {.marimo}
+_base = alt.Chart(all_scores).encode(
+    x=alt.X("comparison:N", sort=COMPARISON_ORDER, title=None,
+            axis=alt.Axis(labelAngle=-20)),
+    color=alt.Color("comparison:N", sort=COMPARISON_ORDER, legend=None,
+                    scale=alt.Scale(range=["#9aa0a6", "#c2387a", "#1d64d8"])),
+)
+_points = _base.mark_circle(size=55, opacity=0.55).encode(
+    y=alt.Y("value:Q", title="score"),
+    xOffset=alt.XOffset("jitter:Q"),
+    tooltip=["comparison", "metric", alt.Tooltip("value:Q", format=".3f")],
+).transform_calculate(jitter="random()")
+_mean = _base.mark_tick(thickness=3, size=34).encode(y="mean(value):Q")
+_err = _base.mark_errorbar(extent="stdev").encode(y=alt.Y("value:Q", title="score"))
+
+comparison_chart = (
+    alt.layer(_points, _err, _mean, data=all_scores)
+    .properties(width=220, height=260)
+    .facet(column=alt.Column("metric:N", title=None))
+    .resolve_scale(y="independent")
+)
+mo.ui.altair_chart(comparison_chart)
+```
