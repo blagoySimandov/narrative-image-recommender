@@ -98,6 +98,9 @@ def _(mo):
     - **random**: each image goes to a random cluster.
 
     If a method does not get a higher hit rate than the baselines, its clusters do not agree with the humans.
+
+    For each human, the **single pick rate** is the number of clusters with exactly one pick, divided by the number of clusters.
+    A single pick rate of 0.9 shows that 9 of the 10 clusters got exactly one pick from that human.
     """)
     return
 
@@ -108,15 +111,21 @@ def _(human_picks, np, pl):
         return float(np.mean([len(np.unique(labels[p])) / len(p) for p in human_picks]))
 
 
+    def single_pick_rate(labels: np.ndarray) -> float:
+        n_clusters = len(np.unique(labels))
+        return float(np.mean([
+            np.sum(np.bincount(labels[p]) == 1) / n_clusters for p in human_picks
+        ]))
+
+
     def scores(labels: np.ndarray) -> dict:
-        real = mean_hitrate(labels)
-        return {"hitrate": real}
+        return {"hitrate": mean_hitrate(labels), "single_pick_rate": single_pick_rate(labels)}
 
 
     def score_table(labels: dict[str, np.ndarray]) -> pl.DataFrame:
         return pl.DataFrame([{"method": name} | scores(l) for name, l in labels.items()])
 
-    return mean_hitrate, score_table
+    return mean_hitrate, score_table, single_pick_rate
 
 
 @app.cell(hide_code=True)
@@ -219,6 +228,7 @@ def _(
     pl,
     random_state,
     score_table,
+    single_pick_rate,
 ):
     from sklearn.base import clone
 
@@ -235,16 +245,19 @@ def _(
 
     def baseline_row(name: str, draw, n_runs: int = 1000) -> dict:
         rng = np.random.default_rng(random_state)
-        hitrates = np.array([mean_hitrate(draw(rng)) for _ in range(n_runs)])
-        return {"method": name, "hitrate": hitrates.mean()}
-
+        draws = [draw(rng) for _ in range(n_runs)]
+        return {
+            "method": name,
+            "hitrate": np.mean([mean_hitrate(d) for d in draws]),
+            "single_pick_rate": np.mean([single_pick_rate(d) for d in draws]),
+        }
 
     baselines = pl.DataFrame([
         baseline_row("shuffled kmeans", lambda rng: rng.permutation(visual_labels["visual kmeans"])),
         baseline_row("random", lambda rng: rng.integers(0, K, size=len(X))),
     ])
 
-    visual_table =  pl.concat([score_table(visual_labels), baselines], how="diagonal")
+    visual_table = pl.concat([score_table(visual_labels), baselines], how="diagonal")
     visual_table
     return visual_labels, visual_table
 

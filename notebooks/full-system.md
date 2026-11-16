@@ -127,7 +127,7 @@ class PyKMedoids(ClusterMixin, BaseEstimator):
 ## Creating the custom KMedoids distance
 
 ```python {.marimo}
-from sklearn.metrics.pairwise import cosine_distances, haversine_distances
+from sklearn.metrics.pairwise import cosine_distances, haversine_distances, euclidean_distances
 K = 10
 
 def _scaled(D):
@@ -138,7 +138,7 @@ def combined_distance(X, weights=(1.0, 1.0, 1.0)):
     geo = X.select("latitude", "longitude").to_numpy()
     emb = X["dino_embeddings"].to_numpy()
     parts = [
-        np.abs(t - t.T),
+        euclidean_distances(t - t.T),
         haversine_distances(geo),
         cosine_distances(emb),
     ]
