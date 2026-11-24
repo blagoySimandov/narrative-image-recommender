@@ -31,6 +31,9 @@ dependencies = [
     "kmedoids>=0.5.5",
     "pyclustering>=0.10.1.2",
     "pyvis>=0.3.2",
+    "networkx>=3.6.1",
+    "sentencepiece>=0.2.3",
+    "protobuf>=7.36.2",
 ]
 
 [project.optional-dependencies]
@@ -56,3 +59,9 @@ dev = [
 
 [tool.marimo.runtime]
 pythonpath = ["."]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.11"
+include = ["*.py", "notebooks"]

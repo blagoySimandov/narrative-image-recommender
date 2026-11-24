@@ -87,7 +87,7 @@ aesthetic = X["musiq_score"].to_numpy()
 
 G = DiGraph()
 for i in range(X.height):
-    G.add_node(i, aesthetic=aesthetic[i])
+    G.add_node(i, prize=aesthetic[i])
 
 duplicate_threshold = 0.95
 for i in range(X.height):
@@ -175,7 +175,7 @@ def best_budget_path(G, k, budget):
                 path + [nxt],
                 visited | {nxt},
                 new_cost,
-                prize + float(G.nodes[nxt]["aesthetic"]),
+                prize + float(G.nodes[nxt]["prize"]),
             )
 
     # Free starting image: try every possible start.
@@ -184,7 +184,7 @@ def best_budget_path(G, k, budget):
             [start],
             {start},
             0.0,
-            float(G.nodes[start]["aesthetic"]),
+            float(G.nodes[start]["prize"]),
         )
 
     return {
@@ -214,7 +214,7 @@ def show_path_strip(path, X, G, thumb=400):
         img = Image.open(X["path"][node]).convert("RGB")
         img.thumbnail((thumb, thumb))
         ax.imshow(img)
-        ax.set_title(f"{pos + 1}. img {node}\naesthetic {G.nodes[node]['aesthetic']:.1f}", fontsize=9)
+        ax.set_title(f"{pos + 1}. img {node}\nprize {G.nodes[node]['prize']:.1f}", fontsize=9)
         ax.axis("off")
     # transition cost written between consecutive images
     for pos, (u, w) in enumerate(zip(path, path[1:])):
@@ -229,14 +229,15 @@ show_path_strip(path, X, G)
 
 ```python {.marimo}
 from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
 
 mo.stop(path is None)
 
-xy = PCA(n_components=2).fit_transform(emb)
+xy = TSNE(n_components=2).fit_transform(emb)
 
 fig2, ax = plt.subplots(figsize=(7, 6))
 sc = ax.scatter(xy[:, 0], xy[:, 1], c=aesthetic, cmap="viridis", s=25, alpha=0.6)
-fig2.colorbar(sc, ax=ax, label="MUSIQ aesthetic")
+fig2.colorbar(sc, ax=ax, label="Prize")
 
 p = xy[path]
 for a, b in zip(p, p[1:]):

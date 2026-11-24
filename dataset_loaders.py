@@ -1,5 +1,8 @@
 import json
 from pathlib import Path
+from typing import Any
+
+import polars as pl
 
 from image_pipeline import ImageRecord
 from models import DataModel
@@ -52,7 +55,9 @@ CUFED_ROOT = Path("datasets/cufed")
 LIVE_ROOT = Path("datasets/live/ChallengeDB_release")
 
 
-def _cufed_rows(album_id: str, records: list, events: list[str]) -> list[dict]:
+def _cufed_rows(
+    album_id: str, records: list, events: list[str]
+) -> list[dict[str, Any]]:
     return [
         {
             "event_id": album_id,
@@ -66,9 +71,7 @@ def _cufed_rows(album_id: str, records: list, events: list[str]) -> list[dict]:
     ]
 
 
-def load_cufed(root: Path = CUFED_ROOT):
-    import polars as pl
-
+def load_cufed(root: Path = CUFED_ROOT) -> pl.DataFrame:
     events = json.loads((root / "event_type.json").read_text())
     importance = json.loads((root / "image_importance.json").read_text())
     album_ids = (root / "test_album_ids.txt").read_text().split()
@@ -80,7 +83,7 @@ def load_cufed(root: Path = CUFED_ROOT):
     return pl.DataFrame(rows)
 
 
-def _mat_vector(path: Path, key: str) -> list:
+def _mat_vector(path: Path, key: str) -> list[Any]:
     from scipy.io import loadmat
 
     return loadmat(path)[key].ravel().tolist()
@@ -93,9 +96,7 @@ def _live_path(root: Path, name: str) -> str:
     return str(folder / name)
 
 
-def load_live(root: Path = LIVE_ROOT):
-    import polars as pl
-
+def load_live(root: Path = LIVE_ROOT) -> pl.DataFrame:
     data = root / "Data"
     names = [
         str(n[0])
@@ -124,7 +125,7 @@ def _yfcc_city_dir(city: str) -> Path:
     return YFCC_CITIES_ROOT / f"yfcmm100m-cities-{city.lower()}"
 
 
-def _yfcc_city_row(city: str, photo: dict) -> dict:
+def _yfcc_city_row(city: str, photo: dict[str, Any]) -> dict[str, Any]:
     image_id = Path(photo["name"]).stem
     return {
         "event_id": city,
@@ -140,7 +141,7 @@ def _yfcc_city_row(city: str, photo: dict) -> dict:
     }
 
 
-def _download_missing_city(city: str, rows: list[dict]) -> None:
+def _download_missing_city(city: str, rows: list[dict[str, Any]]) -> None:
     missing = [
         {"id": r["image_id"], "url_s": r["flickr_url"]}
         for r in rows
@@ -172,7 +173,9 @@ def load_yfcc_human_summaries(city: str) -> list[list[str]]:
         ]
 
 
-def _add_human_picks(row: dict, summaries: list[list[str]]) -> dict:
+def _add_human_picks(
+    row: dict[str, Any], summaries: list[list[str]]
+) -> dict[str, Any]:
     ranks = [
         summary.index(row["image_id"]) + 1 if row["image_id"] in summary else None
         for summary in summaries
@@ -183,9 +186,7 @@ def _add_human_picks(row: dict, summaries: list[list[str]]) -> dict:
     }
 
 
-def load_yfcc_city(city: str, download: bool = True):
-    import polars as pl
-
+def load_yfcc_city(city: str, download: bool = True) -> pl.DataFrame:
     json_path = _yfcc_city_dir(city) / f"{city}.json"
     photos = json.loads(json_path.read_text(encoding="utf-8"))
     summaries = load_yfcc_human_summaries(city)
